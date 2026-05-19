@@ -1,0 +1,15 @@
+/**
+ * Supabase admin client — usar APENAS em Route Handlers e Server Actions.
+ * Bypassa RLS. Nunca importar em Client Components.
+ */
+
+import { createClient } from "@supabase/supabase-js"
+
+const url         = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+export function createAdminClient() {
+  return createClient(url, serviceRole, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+}

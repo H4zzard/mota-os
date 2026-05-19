@@ -1,0 +1,650 @@
+"use client"
+
+import { useState, useEffect, useCallback } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { motion } from "framer-motion"
+import {
+  ArrowLeft, Bot, Save, Trash2, Plus, X,
+  Building2, FileText, Zap, Settings, Cpu,
+} from "lucide-react"
+import type { ApiAgent, ApiAgentFile, ApiAgentCompany } from "@/lib/agent-helpers"
+import { cn } from "@/lib/utils"
+
+type Tab = "geral" | "modelo" | "empresas" | "arquivos" | "capacidades"
+
+const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+  { id: "geral",        label: "Geral",       icon: Bot       },
+  { id: "modelo",       label: "Modelo",      icon: Cpu       },
+  { id: "empresas",     label: "Empresas",    icon: Building2 },
+  { id: "arquivos",     label: "Memória",     icon: FileText  },
+  { id: "capacidades",  label: "Capacidades", icon: Zap       },
+]
+
+const PROVIDERS = ["anthropic", "openai", "gemini"] as const
+const COMPANIES = ["grupo", "cppem", "unicive", "colegio", "everton"] as const
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
+export default function AgentDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const router  = useRouter()
+  const [tab, setTab] = useState<Tab>("geral")
+
+  const [agent,     setAgent]     = useState<ApiAgent | null>(null)
+  const [companies, setCompanies] = useState<ApiAgentCompany[]>([])
+  const [files,     setFiles]     = useState<ApiAgentFile[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [saving,    setSaving]    = useState(false)
+  const [error,     setError]     = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [agentRes, companiesRes, filesRes] = await Promise.all([
+        fetch(`/api/agents/${id}`),
+        fetch(`/api/agents/${id}/companies`),
+        fetch(`/api/agents/${id}/files`),
+      ])
+      if (!agentRes.ok) throw new Error(`Agente não encontrado (${agentRes.status})`)
+      setAgent(await agentRes.json())
+      setCompanies(companiesRes.ok ? await companiesRes.json() : [])
+      setFiles(filesRes.ok ? await filesRes.json() : [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro ao carregar agente")
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => { load() }, [load])
+
+  if (loading) return <LoadingState />
+  if (error || !agent) return <ErrorState error={error} onBack={() => router.push("/agents")} />
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <header
+        className="flex items-center gap-4 px-6 py-4 border-b shrink-0"
+        style={{ borderColor: "var(--border-color)", background: "var(--bg-secondary)" }}
+      >
+        <button
+          onClick={() => router.push("/agents")}
+          className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+          style={{ color: "var(--text-muted)" }}
+        >
+          <ArrowLeft size={16} />
+        </button>
+        <div
+          className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: agent.bg_color }}
+        >
+          <Bot size={16} style={{ color: agent.color }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-sm font-bold truncate" style={{ color: "var(--text-primary)" }}>
+            {agent.name}
+          </h1>
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            {agent.slug} · {agent.status}
+          </p>
+        </div>
+        <StatusBadge status={agent.status} />
+      </header>
+
+      {/* Tabs */}
+      <div
+        className="flex items-center gap-1 px-6 py-2 border-b shrink-0"
+        style={{ borderColor: "var(--border-color)", background: "var(--bg-secondary)" }}
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+              tab === t.id ? "bg-mota-600 text-white" : "hover:bg-[var(--bg-hover)]"
+            )}
+            style={{ color: tab === t.id ? undefined : "var(--text-secondary)" }}
+          >
+            <t.icon size={12} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-2xl mx-auto">
+          {tab === "geral" && (
+            <TabGeral agent={agent} saving={saving} onSave={async (patch) => {
+              setSaving(true)
+              const res = await fetch(`/api/agents/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(patch),
+              })
+              setSaving(false)
+              if (res.ok) setAgent(await res.json())
+            }} />
+          )}
+          {tab === "modelo" && (
+            <TabModelo agent={agent} saving={saving} onSave={async (patch) => {
+              setSaving(true)
+              const res = await fetch(`/api/agents/${id}/model-config`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(patch),
+              })
+              setSaving(false)
+              if (res.ok) { const cfg = await res.json(); setAgent(a => a ? { ...a, config: cfg } : a) }
+            }} />
+          )}
+          {tab === "empresas" && (
+            <TabEmpresas
+              companies={companies}
+              onAttach={async (companyId) => {
+                const res = await fetch(`/api/agents/${id}/companies`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ company_id: companyId }),
+                })
+                if (res.ok) { const newCompany = await res.json(); setCompanies(c => [...c, newCompany]) }
+              }}
+              onDetach={async (companyId) => {
+                await fetch(`/api/agents/${id}/companies`, {
+                  method: "DELETE",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ company_id: companyId }),
+                })
+                setCompanies(c => c.filter(x => x.company_id !== companyId))
+              }}
+            />
+          )}
+          {tab === "arquivos" && (
+            <TabArquivos
+              agentId={id}
+              files={files}
+              onUploaded={(f) => setFiles(prev => [...prev, f])}
+              onDeleted={(fileId) => setFiles(prev => prev.filter(f => f.id !== fileId))}
+            />
+          )}
+          {tab === "capacidades" && (
+            <TabCapacidades agent={agent} saving={saving} onSave={async (patch) => {
+              setSaving(true)
+              const res = await fetch(`/api/agents/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(patch),
+              })
+              setSaving(false)
+              if (res.ok) setAgent(await res.json())
+            }} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Tab: Geral ───────────────────────────────────────────────────────────────
+
+function TabGeral({ agent, saving, onSave }: {
+  agent: ApiAgent
+  saving: boolean
+  onSave: (patch: Record<string, unknown>) => Promise<void>
+}) {
+  const [form, setForm] = useState({
+    name:             agent.name,
+    short_name:       agent.short_name,
+    slug:             agent.slug,
+    description:      agent.description,
+    role_description: agent.role_description ?? "",
+    status:           agent.status,
+    icon:             agent.icon,
+    color:            agent.color,
+    bg_color:         agent.bg_color,
+    category:         agent.category ?? "",
+  })
+
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }))
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, category: form.category || null }) }}
+      className="space-y-4">
+      <Row label="Nome">
+        <input className={inputCls} value={form.name} onChange={set("name")} required />
+      </Row>
+      <Row label="Nome curto">
+        <input className={inputCls} value={form.short_name} onChange={set("short_name")} />
+      </Row>
+      <Row label="Slug">
+        <input className={inputCls} value={form.slug} onChange={set("slug")} />
+      </Row>
+      <Row label="Descrição">
+        <textarea className={inputCls} rows={2} value={form.description} onChange={set("description")} />
+      </Row>
+      <Row label="Descrição do papel">
+        <textarea className={inputCls} rows={4} value={form.role_description} onChange={set("role_description")}
+          placeholder="Descreva o papel e comportamento deste agente..." />
+      </Row>
+      <Row label="Categoria">
+        <input className={inputCls} value={form.category} onChange={set("category")} placeholder="ex: Marketing, Suporte" />
+      </Row>
+      <Row label="Status">
+        <select className={inputCls} value={form.status} onChange={set("status")}>
+          <option value="active">Ativo</option>
+          <option value="paused">Pausado</option>
+          <option value="archived">Arquivado</option>
+        </select>
+      </Row>
+      <Row label="Ícone">
+        <input className={inputCls} value={form.icon} onChange={set("icon")} placeholder="Bot" />
+      </Row>
+      <div className="flex gap-4">
+        <Row label="Cor primária">
+          <div className="flex items-center gap-2">
+            <input type="color" value={form.color} onChange={set("color")}
+              className="w-8 h-8 rounded cursor-pointer border-0" style={{ padding: 0 }} />
+            <input className={cn(inputCls, "flex-1")} value={form.color} onChange={set("color")} />
+          </div>
+        </Row>
+        <Row label="Cor de fundo">
+          <div className="flex items-center gap-2">
+            <input type="color" value={form.bg_color.startsWith("rgba") ? "#6366f1" : form.bg_color}
+              onChange={set("bg_color")}
+              className="w-8 h-8 rounded cursor-pointer border-0" style={{ padding: 0 }} />
+            <input className={cn(inputCls, "flex-1")} value={form.bg_color} onChange={set("bg_color")} />
+          </div>
+        </Row>
+      </div>
+      <SaveButton saving={saving} />
+    </form>
+  )
+}
+
+// ─── Tab: Modelo ──────────────────────────────────────────────────────────────
+
+function TabModelo({ agent, saving, onSave }: {
+  agent: ApiAgent
+  saving: boolean
+  onSave: (patch: Record<string, unknown>) => Promise<void>
+}) {
+  const cfg = agent.config
+  const [form, setForm] = useState({
+    provider:      cfg?.provider      ?? "anthropic",
+    model_id:      cfg?.model_id      ?? "claude-sonnet-4-6",
+    temperature:   cfg?.temperature   ?? 0.7,
+    max_tokens:    cfg?.max_tokens    ?? 2048,
+    system_prompt: cfg?.system_prompt ?? "",
+  })
+
+  const set = (k: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+      setForm(f => ({ ...f, [k]: k === "temperature" || k === "max_tokens" ? Number(e.target.value) : e.target.value }))
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSave(form) }} className="space-y-4">
+      <Row label="Provedor">
+        <select className={inputCls} value={form.provider} onChange={set("provider")}>
+          {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </Row>
+      <Row label="Model ID">
+        <input className={inputCls} value={form.model_id} onChange={set("model_id")}
+          placeholder="claude-sonnet-4-6" />
+      </Row>
+      <Row label={`Temperatura (${form.temperature})`}>
+        <input type="range" min={0} max={1} step={0.05} value={form.temperature} onChange={set("temperature")}
+          className="w-full accent-mota-600" />
+      </Row>
+      <Row label="Max tokens">
+        <input type="number" className={inputCls} value={form.max_tokens} onChange={set("max_tokens")}
+          min={256} max={32000} step={256} />
+      </Row>
+      <Row label="System prompt">
+        <textarea className={inputCls} rows={10} value={form.system_prompt} onChange={set("system_prompt")}
+          placeholder="Você é um assistente de IA especializado em..." />
+      </Row>
+      <SaveButton saving={saving} />
+    </form>
+  )
+}
+
+// ─── Tab: Empresas ────────────────────────────────────────────────────────────
+
+function TabEmpresas({ companies, onAttach, onDetach }: {
+  companies: ApiAgentCompany[]
+  onAttach:  (companyId: string) => Promise<void>
+  onDetach:  (companyId: string) => Promise<void>
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const attached = new Set(companies.map(c => c.company_id))
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+        Defina em quais empresas este agente está disponível.
+      </p>
+      {COMPANIES.map((slug) => {
+        const isAttached = attached.has(slug)
+        return (
+          <div
+            key={slug}
+            className="flex items-center justify-between rounded-xl border px-4 py-3"
+            style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
+          >
+            <div className="flex items-center gap-3">
+              <Building2 size={14} style={{ color: "var(--text-muted)" }} />
+              <span className="text-sm font-medium capitalize" style={{ color: "var(--text-primary)" }}>{slug}</span>
+            </div>
+            <button
+              disabled={busy === slug}
+              onClick={async () => {
+                setBusy(slug)
+                if (isAttached) await onDetach(slug)
+                else await onAttach(slug)
+                setBusy(null)
+              }}
+              className={cn(
+                "text-xs px-3 py-1.5 rounded-lg font-medium transition-colors",
+                isAttached
+                  ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                  : "bg-mota-600 text-white hover:bg-mota-700"
+              )}
+            >
+              {busy === slug ? "..." : isAttached ? "Remover" : "Vincular"}
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Tab: Arquivos / Memória ──────────────────────────────────────────────────
+
+function TabArquivos({ agentId, files, onUploaded, onDeleted }: {
+  agentId:   string
+  files:     ApiAgentFile[]
+  onUploaded:(f: ApiAgentFile) => void
+  onDeleted: (id: string) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [preview,   setPreview]   = useState<ApiAgentFile | null>(null)
+  const [deleting,  setDeleting]  = useState<string | null>(null)
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const fd = new FormData()
+    fd.append("file", file)
+    const res = await fetch(`/api/agents/${agentId}/files/upload`, { method: "POST", body: fd })
+    if (res.ok) onUploaded(await res.json())
+    setUploading(false)
+    e.target.value = ""
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Upload */}
+      <label
+        className={cn(
+          "flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors",
+          uploading ? "opacity-50 pointer-events-none" : "hover:border-mota-500"
+        )}
+        style={{ borderColor: "var(--border-color)" }}
+      >
+        <FileText size={24} style={{ color: "var(--text-muted)" }} />
+        <p className="mt-2 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+          {uploading ? "Enviando..." : "Clique ou arraste um arquivo"}
+        </p>
+        <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+          .md, .txt, .csv, .json · máx 20 MB
+        </p>
+        <input type="file" accept=".md,.txt,.csv,.json" className="hidden" onChange={handleUpload} />
+      </label>
+
+      {/* File list */}
+      {files.length === 0 ? (
+        <p className="text-center text-xs py-8" style={{ color: "var(--text-muted)" }}>
+          Nenhum arquivo de memória ainda.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {files.map((f) => (
+            <div
+              key={f.id}
+              className="flex items-center gap-3 rounded-xl border px-4 py-3"
+              style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
+            >
+              <FileText size={14} style={{ color: "var(--text-muted)" }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium truncate" style={{ color: "var(--text-primary)" }}>
+                  {f.file_name}
+                </p>
+                <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                  {(f.file_size / 1024).toFixed(1)} KB · {f.file_type}
+                  {f.extracted_text && ` · ${f.extracted_text.length.toLocaleString()} chars`}
+                </p>
+              </div>
+              <button
+                className="text-xs px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
+                style={{ color: "var(--text-muted)" }}
+                onClick={() => setPreview(prev => prev?.id === f.id ? null : f)}
+              >
+                {preview?.id === f.id ? "Fechar" : "Ver"}
+              </button>
+              <button
+                disabled={deleting === f.id}
+                onClick={async () => {
+                  setDeleting(f.id)
+                  await fetch(`/api/agent-files/${f.id}`, { method: "DELETE" })
+                  onDeleted(f.id)
+                  setDeleting(null)
+                }}
+                className="p-1.5 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Preview */}
+      {preview?.extracted_text && (
+        <div
+          className="rounded-xl border p-4 font-mono text-[11px] max-h-64 overflow-y-auto whitespace-pre-wrap"
+          style={{ background: "var(--bg-card)", borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+        >
+          {preview.extracted_text}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Tab: Capacidades ─────────────────────────────────────────────────────────
+
+function TabCapacidades({ agent, saving, onSave }: {
+  agent: ApiAgent
+  saving: boolean
+  onSave: (patch: Record<string, unknown>) => Promise<void>
+}) {
+  const [capabilities, setCapabilities] = useState<string[]>(agent.capabilities)
+  const [tools,        setTools]        = useState<string[]>(agent.tools)
+  const [newCap,  setNewCap]  = useState("")
+  const [newTool, setNewTool] = useState("")
+
+  const addItem = (list: string[], setList: (v: string[]) => void, val: string) => {
+    const v = val.trim()
+    if (v && !list.includes(v)) setList([...list, v])
+  }
+
+  const removeItem = (list: string[], setList: (v: string[]) => void, val: string) =>
+    setList(list.filter(x => x !== val))
+
+  return (
+    <div className="space-y-6">
+      {/* Capabilities */}
+      <section>
+        <h3 className="text-xs font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+          Capacidades
+        </h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {capabilities.map(c => (
+            <span
+              key={c}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border"
+              style={{ borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+            >
+              {c}
+              <button onClick={() => removeItem(capabilities, setCapabilities, c)}>
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            className={cn(inputCls, "flex-1")}
+            value={newCap}
+            onChange={e => setNewCap(e.target.value)}
+            placeholder="Nova capacidade..."
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(capabilities, setCapabilities, newCap); setNewCap("") } }}
+          />
+          <button type="button"
+            className="px-3 py-2 rounded-xl bg-mota-600 text-white hover:bg-mota-700 transition-colors"
+            onClick={() => { addItem(capabilities, setCapabilities, newCap); setNewCap("") }}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      </section>
+
+      {/* Tools */}
+      <section>
+        <h3 className="text-xs font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
+          Ferramentas (tools)
+        </h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {tools.map(t => (
+            <span
+              key={t}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-mono"
+              style={{ borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+            >
+              {t}
+              <button onClick={() => removeItem(tools, setTools, t)}>
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            className={cn(inputCls, "flex-1 font-mono")}
+            value={newTool}
+            onChange={e => setNewTool(e.target.value)}
+            placeholder="ex: web_search, code_interpreter"
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(tools, setTools, newTool); setNewTool("") } }}
+          />
+          <button type="button"
+            className="px-3 py-2 rounded-xl bg-mota-600 text-white hover:bg-mota-700 transition-colors"
+            onClick={() => { addItem(tools, setTools, newTool); setNewTool("") }}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      </section>
+
+      <button
+        disabled={saving}
+        onClick={() => onSave({ capabilities, tools })}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-mota-600 hover:bg-mota-700 disabled:opacity-50 transition-colors"
+      >
+        <Save size={13} />
+        {saving ? "Salvando..." : "Salvar capacidades"}
+      </button>
+    </div>
+  )
+}
+
+// ─── Shared helpers ────────────────────────────────────────────────────────────
+
+const inputCls = cn(
+  "w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors",
+  "focus:border-mota-500"
+)
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>{label}</label>
+      <div style={{ ["--tw-border-color" as string]: "var(--border-color)", background: "var(--bg-card)", color: "var(--text-primary)" }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function SaveButton({ saving }: { saving: boolean }) {
+  return (
+    <button
+      type="submit"
+      disabled={saving}
+      className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-mota-600 hover:bg-mota-700 disabled:opacity-50 transition-colors"
+    >
+      <Save size={13} />
+      {saving ? "Salvando..." : "Salvar alterações"}
+    </button>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    active:   { label: "Ativo",     cls: "bg-mota-500/20 text-mota-400"    },
+    paused:   { label: "Pausado",   cls: "bg-yellow-500/20 text-yellow-400" },
+    archived: { label: "Arquivado", cls: "bg-gray-500/20 text-gray-400"     },
+  }
+  const s = map[status] ?? { label: status, cls: "bg-gray-500/20 text-gray-400" }
+  return (
+    <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", s.cls)}>
+      {s.label}
+    </span>
+  )
+}
+
+function LoadingState() {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="space-y-3 w-full max-w-2xl p-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-12 rounded-xl animate-pulse"
+            style={{ background: "var(--bg-card)" }} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ErrorState({ error, onBack }: { error: string | null; onBack: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4">
+      <Bot size={32} style={{ color: "var(--text-muted)" }} />
+      <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+        {error ?? "Agente não encontrado"}
+      </p>
+      <button
+        onClick={onBack}
+        className="flex items-center gap-2 text-xs px-3 py-2 rounded-xl bg-mota-600 text-white hover:bg-mota-700"
+      >
+        <ArrowLeft size={13} /> Voltar
+      </button>
+    </div>
+  )
+}
