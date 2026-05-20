@@ -50,9 +50,12 @@ export type AIChunk = AIChunkDelta | AIChunkDone | AIChunkError
 // ─── Clientes (instanciados uma vez, reutilizados) ────────────────────────────
 
 function getAnthropicClient() {
-  const key = process.env.ANTHROPIC_API_KEY
-  if (!key) throw new Error("ANTHROPIC_API_KEY não configurada")
-  return new Anthropic({ apiKey: key })
+  // Sem API key estática — o SDK resolve credenciais via WIF (variáveis ANTHROPIC_FEDERATION_*)
+  // ou via ANTHROPIC_API_KEY se estiver definida. Não forçar a key aqui.
+  return new Anthropic({
+    baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
+    maxRetries: 2,
+  })
 }
 
 function getOpenAIClient() {

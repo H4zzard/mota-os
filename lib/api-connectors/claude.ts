@@ -1,31 +1,9 @@
-/**
- * Claude (Anthropic) connector — Mota OS
- * Credenciais em .env.local → ANTHROPIC_API_KEY
- * Usar apenas em Server Components, Route Handlers ou Server Actions.
- */
+// claude.ts — sem imports problemáticos, SDK resolve WIF automaticamente
 
 import Anthropic from "@anthropic-ai/sdk"
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-export interface ClaudeConfig {
-  apiKey:       string
-  defaultModel: ClaudeModel
-  maxRetries:   number
-}
-
-function getConfig(): ClaudeConfig {
-  return {
-    apiKey:       process.env.ANTHROPIC_API_KEY ?? "",
-    defaultModel: "claude-sonnet-4-6",
-    maxRetries:   2,
-  }
-}
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 export type ClaudeModel =
-  | "claude-opus-4-7"
+  | "claude-opus-4-6"
   | "claude-sonnet-4-6"
   | "claude-haiku-4-5-20251001"
 
@@ -47,36 +25,37 @@ export interface ClaudeChatResponse {
   model:       string
   content:     string
   stop_reason: string
-  usage: {
-    input_tokens:  number
-    output_tokens: number
-  }
+  usage: { input_tokens: number; output_tokens: number }
 }
 
-// ─── Pricing (USD per token) ─────────────────────────────────────────────────
-
 const PRICING: Record<ClaudeModel, { in: number; out: number }> = {
-  "claude-opus-4-7":           { in: 0.000015,  out: 0.000075  },
+  "claude-opus-4-6":           { in: 0.000015,  out: 0.000075  },
   "claude-sonnet-4-6":         { in: 0.000003,  out: 0.000015  },
   "claude-haiku-4-5-20251001": { in: 0.0000008, out: 0.000004  },
 }
 
-// ─── Client ──────────────────────────────────────────────────────────────────
-
 export class ClaudeClient {
   private sdk: Anthropic
+  private defaultModel: ClaudeModel = "claude-sonnet-4-6"
 
-  constructor(private config: ClaudeConfig) {
+  constructor() {
+    // WIF (Workload Identity Federation) — sem API key estática.
+    // O SDK lê automaticamente as variáveis de ambiente:
+    //   ANTHROPIC_FEDERATION_RULE_ID   → ID da regra (fdrl_...)
+    //   ANTHROPIC_ORGANIZATION_ID      → UUID da organização
+    //   ANTHROPIC_SERVICE_ACCOUNT_ID   → ID da service account (svac_...)
+    //   ANTHROPIC_IDENTITY_TOKEN_FILE  → caminho do JWT emitido pelo GitHub Actions
+    //   ANTHROPIC_WORKSPACE_ID         → opcional; omitir quando a regra usa "todos os workspaces"
+    // Se ANTHROPIC_API_KEY estiver definida, ela tem precedência e silencia o WIF.
     this.sdk = new Anthropic({
-      apiKey:     config.apiKey,
-      maxRetries: config.maxRetries,
+      baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
+      maxRetries: 2,
     })
   }
 
-  /** Completion síncrona. */
   async chat(request: ClaudeChatRequest): Promise<ClaudeChatResponse> {
     const response = await this.sdk.messages.create({
-      model:      request.model      ?? this.config.defaultModel,
+      model:      request.model      ?? this.defaultModel,
       max_tokens: request.max_tokens ?? 4096,
       system:     request.system,
       messages:   request.messages,
@@ -98,10 +77,9 @@ export class ClaudeClient {
     }
   }
 
-  /** Streaming — yield de tokens de texto conforme chegam. */
   async *stream(request: ClaudeChatRequest): AsyncGenerator<string> {
     const stream = this.sdk.messages.stream({
-      model:      request.model      ?? this.config.defaultModel,
+      model:      request.model      ?? this.defaultModel,
       max_tokens: request.max_tokens ?? 4096,
       system:     request.system,
       messages:   request.messages,
@@ -109,22 +87,16 @@ export class ClaudeClient {
     })
 
     for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
+      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
         yield event.delta.text
       }
     }
   }
 
-  /** Custo estimado em USD. */
   estimateCost(inputTokens: number, outputTokens: number, model: ClaudeModel = "claude-sonnet-4-6"): number {
     const p = PRICING[model]
     return inputTokens * p.in + outputTokens * p.out
   }
 }
 
-export function createClaudeClient(config = getConfig()): ClaudeClient {
-  return new ClaudeClient(config)
-}
+export const claudeClient = new ClaudeClient()

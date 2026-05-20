@@ -1,0 +1,45 @@
+name: Claude WIF Auth
+
+on:
+  workflow_call: {} # pode ser chamado por outros workflows
+  workflow_dispatch: {} # ou disparado manualmente
+
+permissions:
+  id-token: write # OBRIGATÓRIO para obter o JWT do GitHub OIDC
+  contents: read
+
+jobs:
+  call-claude:
+    runs-on: ubuntu-latest
+
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ secrets.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ secrets.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ secrets.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+
+      ANTHROPIC_IDENTITY_TOKEN_FILE: /tmp/gha-jwt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. Busca o JWT do GitHub OIDC e salva em arquivo
+      - name: Fetch GitHub OIDC token
+        run: |
+          curl -sS \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://api.anthropic.com" \
+            | jq -r .value > /tmp/gha-jwt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # A partir daqui o SDK da Anthropic usa WIF automaticamente
+      # (lê as env vars + o arquivo /tmp/gha-jwt)
+      - name: Build
+        run: npm run build

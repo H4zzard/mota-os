@@ -20,6 +20,9 @@
 # production
 /build
 
+# anthropic wif token (gerado por scripts/refresh-anthropic-token.mjs)
+/tmp/
+
 # misc
 .DS_Store
 *.pem
