@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node --env-file=.env.local scripts/refresh-anthropic-token.mjs",
     "dev": "next dev",
     "build": "next build",
+    "prestart": "node --env-file=.env.local scripts/refresh-anthropic-token.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "refresh-token": "node --env-file=.env.local scripts/refresh-anthropic-token.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
