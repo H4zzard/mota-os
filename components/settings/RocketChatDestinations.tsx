@@ -579,7 +579,7 @@ function DestinationForm({
           <input
             value={form.alias}
             onChange={(e) => setF("alias", e.target.value)}
-            placeholder="Mota OS"
+            placeholder="Jarvis"
             className="w-full rounded-lg px-2.5 py-2 text-xs border outline-none"
             style={inputStyle}
           />

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Mota OS — Sistema Operacional de IA",
+  title: "Jarvis — Sistema Operacional de IA",
   description: "Sistema interno do Grupo Mota Educação com IA integrada",
 }
 

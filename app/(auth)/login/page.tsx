@@ -106,7 +106,7 @@ export default function LoginPage() {
   }
 
   const titleMap: Record<Mode, string> = {
-    login:  "Mota OS",
+    login:  "Jarvis",
     forgot: "Recuperar senha",
     magic:  "Link mágico",
   }

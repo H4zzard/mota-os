@@ -1,5 +1,5 @@
 /**
- * Supabase client — Mota OS
+ * Supabase client — Jarvis
  * Credenciais em .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
  *   NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...   ← público, vai ao browser

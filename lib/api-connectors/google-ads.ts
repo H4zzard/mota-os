@@ -1,5 +1,5 @@
 /**
- * Google Ads connector — Mota OS
+ * Google Ads connector — Jarvis
  * Credenciais em .env.local:
  *   GOOGLE_ADS_DEVELOPER_TOKEN=xxxxxxxxxx
  *   GOOGLE_ADS_CLIENT_ID=xxxxxxxxxx.apps.googleusercontent.com

@@ -1,5 +1,5 @@
 /**
- * Rocket.Chat connector — Mota OS
+ * Rocket.Chat connector — Jarvis
  * Credenciais em .env.local:
  *   ROCKETCHAT_URL          → https://rocketchat.gmeducacao.tech
  *   ROCKETCHAT_USER_ID      → ID do usuário/bot

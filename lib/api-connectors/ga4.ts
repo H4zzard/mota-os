@@ -1,5 +1,5 @@
 /**
- * Google Analytics 4 (Data API) connector — Mota OS
+ * Google Analytics 4 (Data API) connector — Jarvis
  * Credenciais em .env.local:
  *   GA4_PROPERTY_ID=xxxxxxxxx          (numérico, sem "properties/")
  *   GOOGLE_SERVICE_ACCOUNT_JSON='{...}'  (JSON da service account)

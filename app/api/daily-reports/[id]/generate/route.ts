@@ -69,7 +69,7 @@ export async function POST(
   const activitiesList = activities.map((a) => `• ${a}`).join("\n")
 
   // ─── Prompt: a IA deve gerar APENAS o corpo do relatório ──────────────────
-  const systemPrompt = `Você é um assistente de RH do Mota OS. Sua tarefa é transformar uma lista de atividades diárias em um texto profissional descrevendo o trabalho realizado.
+  const systemPrompt = `Você é um assistente de RH do Jarvis. Sua tarefa é transformar uma lista de atividades diárias em um texto profissional descrevendo o trabalho realizado.
 
 Regras obrigatórias:
 - Gere APENAS o corpo do relatório — texto corrido ou tópicos organizados

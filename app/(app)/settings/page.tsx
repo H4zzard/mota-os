@@ -372,7 +372,10 @@ function CompanyMembersSection({ companySlug, isAdmin }: { companySlug: string; 
         ])
         if (!membersRes.ok) throw new Error(`HTTP ${membersRes.status}`)
         setMembers(await membersRes.json() as CompanyMember[])
-        if (usersRes?.ok) setAllUsers(await usersRes.json() as UserItem[])
+        if (usersRes?.ok) {
+          const usersJson = await usersRes.json() as { users?: UserItem[] } | UserItem[]
+          setAllUsers(Array.isArray(usersJson) ? usersJson : (usersJson.users ?? []))
+        }
       } catch (e: unknown) {
         setFetchErr(e instanceof Error ? e.message : "Erro ao carregar membros")
       } finally {
@@ -427,7 +430,8 @@ function CompanyMembersSection({ companySlug, isAdmin }: { companySlug: string; 
   }
 
   const existingIds    = new Set(members.map(m => m.user_id))
-  const availableUsers = allUsers.filter(u => !existingIds.has(u.id))
+  const usersArray     = Array.isArray(allUsers) ? allUsers : []
+  const availableUsers = usersArray.filter(u => !existingIds.has(u.id))
 
   return (
     <div className="space-y-3 pt-4 border-t" style={{ borderColor: "var(--border-color)" }}>
@@ -521,6 +525,12 @@ function CompanyMembersSection({ companySlug, isAdmin }: { companySlug: string; 
             {adding ? <Loader2 size={11} className="animate-spin" /> : "Adicionar"}
           </button>
         </div>
+      )}
+
+      {isAdmin && !loading && usersArray.length > 0 && availableUsers.length === 0 && (
+        <p className="text-[11px] pt-2 border-t" style={{ borderColor: "var(--border-color)", color: "var(--text-muted)" }}>
+          Nenhum usuário disponível para adicionar.
+        </p>
       )}
     </div>
   )
@@ -830,8 +840,11 @@ function UsersTab() {
 
   useEffect(() => {
     fetch("/api/users")
-      .then((r) => r.json())
-      .then((data) => { setUsers(data); setLoading(false) })
+      .then((r) => r.json() as Promise<{ users?: AuthUser[] } | AuthUser[]>)
+      .then((data) => {
+        setUsers(Array.isArray(data) ? data : (data.users ?? []))
+        setLoading(false)
+      })
       .catch(() => setLoading(false))
   }, [])
 
@@ -1311,7 +1324,7 @@ function RocketChatConfigFields({
   const webhookFields: FieldDef[] = [
     { key: "webhook_url",     label: "Webhook URL",          secret: true,  placeholder: "https://chat.empresa.com/hooks/..." },
     { key: "default_channel", label: "Canal padrão",         secret: false, placeholder: "#geral ou ID da sala" },
-    { key: "alias",           label: "Alias / Nome exibido", secret: false, placeholder: "Mota OS" },
+    { key: "alias",           label: "Alias / Nome exibido", secret: false, placeholder: "Jarvis" },
   ]
 
   const activeFields = rcMode === "webhook" ? webhookFields : restFields
@@ -2350,7 +2363,7 @@ function SessionsSection() {
       </div>
 
       <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-        Dispositivos onde você acessou o Mota OS recentemente. Revogar remove o registro — a expiração do token JWT depende do Supabase Auth.
+        Dispositivos onde você acessou o Jarvis recentemente. Revogar remove o registro — a expiração do token JWT depende do Supabase Auth.
       </p>
 
       {revokeNote && (

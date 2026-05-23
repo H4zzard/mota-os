@@ -1,5 +1,5 @@
 /**
- * OpenAI connector — Mota OS
+ * OpenAI connector — Jarvis
  * Credenciais em .env.local → OPENAI_API_KEY
  * Usar apenas em Server Components, Route Handlers ou Server Actions.
  */

@@ -35,7 +35,7 @@ function buildMessage(report: {
     "*Relatório do dia:*",
     cleanText,
     "",
-    "_Gerado pelo Mota OS_",
+    "_Gerado pelo Jarvis_",
   ].filter((l) => l !== null).join("\n")
 }
 
@@ -113,7 +113,7 @@ export async function POST(
       if (!webhookUrl) throw new Error("webhook_url não configurado")
 
       const body: Record<string, string> = {
-        alias:   (dest.alias as string | null) ?? "Mota Reports",
+        alias:   (dest.alias as string | null) ?? "Jarvis",
         channel: dest.channel as string,
         text:    message,
       }

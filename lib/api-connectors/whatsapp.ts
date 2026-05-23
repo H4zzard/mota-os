@@ -1,5 +1,5 @@
 /**
- * WhatsApp Business API (Meta Cloud API) connector — Mota OS
+ * WhatsApp Business API (Meta Cloud API) connector — Jarvis
  *
  * HOW TO ACTIVATE:
  *   1. No package needed — uses the Cloud API REST endpoint.

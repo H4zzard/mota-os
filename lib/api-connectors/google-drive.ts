@@ -1,5 +1,5 @@
 /**
- * Google Drive connector — Mota OS
+ * Google Drive connector — Jarvis
  * Credenciais em .env.local:
  *   GOOGLE_SERVICE_ACCOUNT_JSON='{...}'     (JSON da service account com escopo Drive)
  *   GOOGLE_DRIVE_ROOT_FOLDER_ID=xxxxxxxxxx  (pasta compartilhada com a service account)

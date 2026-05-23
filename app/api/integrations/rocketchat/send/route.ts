@@ -111,7 +111,7 @@ async function sendWebhook(dest: RCDest, message: string, channelOverride?: stri
 
   const target = channelOverride?.trim() || dest.channel
   const body: Record<string, string> = {
-    alias:   dest.alias ?? "Mota OS",
+    alias:   dest.alias ?? "Jarvis",
     channel: target,
     text:    message.trim(),
   }
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
           const res = await fetch(cfg.webhook_url, {
             method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ alias: cfg.alias ?? "Mota OS", channel: logChannel, text: message.trim() }),
+            body:    JSON.stringify({ alias: cfg.alias ?? "Jarvis", channel: logChannel, text: message.trim() }),
           })
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
         } else {

@@ -1,5 +1,5 @@
 /**
- * Claude (Anthropic) connector — Mota OS
+ * Claude (Anthropic) connector — Jarvis
  * Credenciais em .env.local → ANTHROPIC_API_KEY
  * Usar apenas em Server Components, Route Handlers ou Server Actions.
  */

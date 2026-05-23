@@ -75,6 +75,6 @@ export async function DELETE(req: NextRequest) {
 
   return NextResponse.json({
     ok:   true,
-    note: "Sessão marcada como revogada no Mota OS. A revogação completa do token depende da expiração natural no Supabase Auth.",
+    note: "Sessão marcada como revogada no Jarvis. A revogação completa do token depende da expiração natural no Supabase Auth.",
   })
 }

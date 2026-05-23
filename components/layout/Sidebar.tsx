@@ -202,7 +202,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold leading-none truncate" style={{ color: "var(--text-primary)" }}>
-                  Mota OS
+                  Jarvis
                 </p>
                 <p className="text-[10px] mt-0.5 truncate" style={{ color: "var(--text-muted)" }}>
                   Grupo Mota Educação

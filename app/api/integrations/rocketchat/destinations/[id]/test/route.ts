@@ -32,7 +32,7 @@ export async function POST(
 
   const mode       = (dest.mode       as string) ?? "webhook"
   const channel    = (dest.channel    as string)
-  const alias      = (dest.alias      as string | null) ?? "Mota OS"
+  const alias      = (dest.alias      as string | null) ?? "Jarvis"
   const avatar     = (dest.avatar     as string | null) ?? null
   const name       = (dest.name       as string)
   const webhookUrl = (dest.webhook_url as string | null)
@@ -40,7 +40,7 @@ export async function POST(
   const rcUserId   = (dest.user_id    as string | null)
   const authToken  = (dest.auth_token as string | null)
 
-  const testMessage = `✅ Teste de conexão do destino "${name}" no Mota OS.`
+  const testMessage = `✅ Teste de conexão do destino "${name}" no Jarvis.`
 
   let testOk         = false
   let errMsg         = ""

@@ -1,5 +1,5 @@
 /**
- * Meta Ads (Facebook Graph API) connector — Mota OS
+ * Meta Ads (Facebook Graph API) connector — Jarvis
  *
  * HOW TO ACTIVATE:
  *   1. No package needed — uses the Graph API REST endpoint directly.

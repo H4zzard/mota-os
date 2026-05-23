@@ -1,5 +1,5 @@
 /**
- * Reportei connector — Mota OS
+ * Reportei connector — Jarvis
  *
  * HOW TO ACTIVATE:
  *   1. No package needed — Reportei exposes a REST API.

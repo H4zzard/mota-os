@@ -1,5 +1,5 @@
 /**
- * Google Gemini connector — Mota OS
+ * Google Gemini connector — Jarvis
  * Credenciais em .env.local → GOOGLE_AI_API_KEY
  * Usar apenas em Server Components, Route Handlers ou Server Actions.
  */

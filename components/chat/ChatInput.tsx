@@ -202,7 +202,7 @@ export function ChatInput({
           value={value}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder="Mensagem para o Mota OS..."
+          placeholder="Mensagem para o Jarvis..."
           disabled={disabled}
           rows={1}
           className={cn(

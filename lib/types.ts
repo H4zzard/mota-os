@@ -1,5 +1,5 @@
 /**
- * Mota OS — canonical TypeScript types.
+ * Jarvis — canonical TypeScript types.
  *
  * Each interface maps 1-to-1 to a Supabase table (snake_case columns).
  * The mock data files use a subset of these fields with camelCase aliases;

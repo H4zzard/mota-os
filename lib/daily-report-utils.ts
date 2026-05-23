@@ -15,7 +15,7 @@ const BAD_LINE_PATTERNS = [
   /^Data\s*:/i,
   /^_?Gerado\s+(pelo|automaticamente)/i,
   /^_?Relatório\s+gerado/i,
-  /^Mota\s+OS\s*_?$/i,
+  /^_?(Mota\s+OS|Jarvis)\s*_?$/i,  // assinatura do sistema (legado + novo)
 ]
 
 /**

@@ -115,9 +115,9 @@ export async function POST(req: NextRequest) {
               method:  "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                alias:   alias || "Mota OS",
+                alias:   alias || "Jarvis",
                 channel: default_channel || "",
-                text:    "✅ Teste de conexão do Mota OS com Rocket.Chat realizado com sucesso.",
+                text:    "✅ Teste de conexão do Jarvis com Rocket.Chat realizado com sucesso.",
               }),
             })
             if (!res.ok) {
