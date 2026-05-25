@@ -1,37 +1,46 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import {
   User, Building2, Users, Brain, KeyRound,
   Database, Palette, ShieldCheck, ScrollText,
   Check, Moon, Sun, Monitor, AlertCircle,
-  RefreshCw, Trash2, LogOut, Loader2,
+  RefreshCw, Trash2, LogOut, Loader2, Link2, Link2Off,
 } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { useThemeContext } from "@/components/layout/ThemeProvider"
 import { createClient as createBrowserClient } from "@/lib/supabase-browser"
 import { cn } from "@/lib/utils"
 import { RocketChatDestinations } from "@/components/settings/RocketChatDestinations"
+import { useCompany } from "@/components/providers/CompanyProvider"
 
 
 type SettingsTab =
   | "profile" | "companies" | "users" | "models"
   | "apis" | "supabase" | "appearance" | "security" | "logs"
 
-const settingsTabs: { id: SettingsTab; label: string; icon: React.ElementType }[] = [
+const settingsTabs: { id: SettingsTab; label: string; icon: React.ElementType; adminOnly?: boolean }[] = [
   { id: "profile",    label: "Perfil",         icon: User        },
-  { id: "companies",  label: "Empresas",        icon: Building2   },
-  { id: "users",      label: "Usuários",        icon: Users       },
-  { id: "models",     label: "Modelos de IA",   icon: Brain       },
-  { id: "apis",       label: "APIs",            icon: KeyRound    },
-  { id: "supabase",   label: "Supabase",        icon: Database    },
+  { id: "companies",  label: "Empresas",        icon: Building2,  adminOnly: true },
+  { id: "users",      label: "Usuários",        icon: Users,      adminOnly: true },
+  { id: "models",     label: "Modelos de IA",   icon: Brain,      adminOnly: true },
+  { id: "apis",       label: "APIs",            icon: KeyRound,   adminOnly: true },
+  { id: "supabase",   label: "Supabase",        icon: Database,   adminOnly: true },
   { id: "appearance", label: "Aparência",       icon: Palette     },
   { id: "security",   label: "Segurança",       icon: ShieldCheck },
-  { id: "logs",       label: "Logs",            icon: ScrollText  },
+  { id: "logs",       label: "Logs",            icon: ScrollText, adminOnly: true },
 ]
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("profile")
+  const { isAdmin, loading: companyLoading } = useCompany()
+  const searchParams = useSearchParams()
+  const initialTab = (searchParams.get("tab") as SettingsTab | null) ?? "profile"
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
+
+  const visibleTabs = companyLoading
+    ? settingsTabs.filter(t => !t.adminOnly)
+    : settingsTabs.filter(t => !t.adminOnly || isAdmin)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -43,7 +52,7 @@ export default function SettingsPage() {
           className="w-52 shrink-0 border-r overflow-y-auto p-3 space-y-0.5"
           style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}
         >
-          {settingsTabs.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
@@ -1221,6 +1230,463 @@ function ModelsTab() {
   )
 }
 
+/* ─── Conta Azul Card ─── */
+
+interface ContaAzulStatus {
+  env_configured:  boolean
+  connected:       boolean
+  status:          string
+  token_status:    "valid" | "expired" | "missing"
+  expires_at:      string | null
+  connected_at:    string | null
+  updated_at:      string | null
+  saved_endpoint:  string | null
+  saved_variant:   string | null
+  connection:      { id: string; status: string; last_tested_at: string | null; updated_at: string | null; error_message: string | null } | null
+  recent_syncs:    Array<{ id: string; status: string; processed: number; inserted: number; failed: number; started_at: string; finished_at: string | null; error_message: string | null }>
+}
+
+interface ProbeResult {
+  path:         string
+  status:       number
+  ok:           boolean
+  count:        number | null
+  fields:       string[] | null
+  sample:       Record<string, string> | null
+  error:        string | null
+  rate_limited: boolean
+}
+
+function ContaAzulCard() {
+  const searchParams = useSearchParams()
+  const router       = useRouter()
+  const [caStatus,       setCaStatus]       = useState<ContaAzulStatus | null>(null)
+  const [loading,        setLoading]        = useState(true)
+  const [syncing,        setSyncing]        = useState(false)
+  const [disconnecting,  setDisconnecting]  = useState(false)
+  const [feedback,       setFeedback]       = useState<{ kind: "ok" | "error"; msg: string } | null>(null)
+  const [probePath,      setProbePath]      = useState("")
+  const [probingPath,    setProbingPath]    = useState(false)
+  const [probeResult,    setProbeResult]    = useState<ProbeResult | null>(null)
+  const [savingEndpoint, setSavingEndpoint] = useState(false)
+  const [showHistory,    setShowHistory]    = useState(false)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    fetch("/api/integrations/conta-azul/status")
+      .then((r) => r.json() as Promise<ContaAzulStatus>)
+      .then((s) => {
+        setCaStatus(s)
+        // Pré-preenche o campo com o endpoint salvo (apenas na carga inicial)
+        setProbePath(prev => prev || s.saved_endpoint || "")
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    load()
+    const err = searchParams.get("conta_azul_error")
+    const ok  = searchParams.get("conta_azul_success")
+    if (err) setFeedback({ kind: "error", msg: decodeURIComponent(err) })
+    if (ok) {
+      setFeedback({ kind: "ok", msg: "Conta Azul conectada com sucesso!" })
+      router.replace("/settings?tab=apis&provider=conta_azul")
+    }
+  }, [load, searchParams, router])
+
+  async function handleSync() {
+    setSyncing(true)
+    setFeedback(null)
+    try {
+      const res  = await fetch("/api/integrations/conta-azul/sync", { method: "POST" })
+      const json = await res.json() as {
+        ok?: boolean; error?: string; connected?: boolean
+        endpoint_missing?: boolean; processed?: number; inserted?: number
+      }
+      if (res.status === 422 && json.endpoint_missing) {
+        setFeedback({ kind: "error", msg: json.error ?? "Nenhum endpoint configurado. Teste e selecione um endpoint válido." })
+        return
+      }
+      if (res.status === 429) {
+        setFeedback({ kind: "error", msg: "Limite temporário da Conta Azul atingido. Aguarde alguns minutos e tente novamente." })
+        return
+      }
+      if (!res.ok) throw new Error(json.error ?? "Erro na sincronização")
+      const msg = (json.processed ?? 0) === 0
+        ? "Nenhuma venda encontrada no período selecionado."
+        : `${json.inserted ?? 0} importadas de ${json.processed ?? 0} processadas.`
+      setFeedback({ kind: "ok", msg })
+      load()
+    } catch (e) {
+      setFeedback({ kind: "error", msg: e instanceof Error ? e.message : "Erro na sincronização" })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleProbeOne() {
+    const path = probePath.trim()
+    if (!path) {
+      setFeedback({ kind: "error", msg: "Informe o caminho do endpoint (ex: /v1/sales)" })
+      return
+    }
+    setProbingPath(true)
+    setProbeResult(null)
+    setFeedback(null)
+    const now       = new Date()
+    const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+    const endDate   = now.toISOString().slice(0, 10)
+    try {
+      const res  = await fetch("/api/integrations/conta-azul/probe", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ path, start_date: startDate, end_date: endDate }),
+      })
+      const json = await res.json() as ProbeResult
+      setProbeResult(json)
+      if (json.rate_limited) {
+        setFeedback({ kind: "error", msg: "Limite temporário da Conta Azul atingido. Aguarde alguns minutos e tente novamente." })
+      }
+    } catch (e) {
+      setFeedback({ kind: "error", msg: e instanceof Error ? e.message : "Erro ao testar endpoint" })
+    } finally {
+      setProbingPath(false)
+    }
+  }
+
+  async function handleSaveEndpoint(path: string) {
+    setSavingEndpoint(true)
+    setFeedback(null)
+    try {
+      await fetch("/api/integrations/conta-azul/save-endpoint", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ path, variant: "start_date/end_date" }),
+      })
+      setFeedback({ kind: "ok", msg: `Endpoint ${path} salvo. Clique em Sincronizar para importar os dados.` })
+      setProbeResult(null)
+      load()
+    } catch (e) {
+      setFeedback({ kind: "error", msg: e instanceof Error ? e.message : "Erro ao salvar endpoint" })
+    } finally {
+      setSavingEndpoint(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm("Desconectar a Conta Azul? Os tokens OAuth serão removidos, mas as vendas importadas serão mantidas.")) return
+    setDisconnecting(true)
+    setFeedback(null)
+    try {
+      const res = await fetch("/api/integrations/conta-azul/disconnect", { method: "POST" })
+      if (!res.ok) throw new Error("Erro ao desconectar")
+      setFeedback({ kind: "ok", msg: "Conta Azul desconectada. Tokens removidos." })
+      load()
+    } catch (e) {
+      setFeedback({ kind: "error", msg: e instanceof Error ? e.message : "Erro" })
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  const badge = (() => {
+    if (loading)                             return { label: "...",           color: "#94a3b8", bg: "rgba(148,163,184,0.1)" }
+    if (!caStatus?.connected)                return { label: "Não conectado", color: "#94a3b8", bg: "rgba(148,163,184,0.1)" }
+    if (caStatus.token_status === "expired") return { label: "Token expirado", color: "#ef4444", bg: "rgba(239,68,68,0.1)" }
+    return { label: "Conectado", color: "#16a34a", bg: "rgba(22,163,74,0.1)" }
+  })()
+
+  const isConnected = !loading && !!caStatus?.connected && caStatus.token_status !== "expired"
+
+  return (
+    <div
+      className="rounded-2xl border overflow-hidden"
+      style={{
+        background:  "var(--bg-card)",
+        borderColor: isConnected ? "rgba(22,163,74,0.25)" : "var(--border-color)",
+      }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <div className="w-2.5 h-2.5 rounded-full shrink-0"
+          style={{ background: isConnected ? "#16a34a" : "#00c7a8" }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>Conta Azul</p>
+          {caStatus?.connected_at && (
+            <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+              Conectado em {new Date(caStatus.connected_at).toLocaleString("pt-BR")}
+            </p>
+          )}
+        </div>
+        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+          style={{ background: badge.bg, color: badge.color }}>
+          {badge.label}
+        </span>
+      </div>
+
+      {/* Body */}
+      <div className="px-4 pb-5 border-t space-y-4" style={{ borderColor: "var(--border-color)" }}>
+        <div className="pt-4 space-y-3">
+
+          {!caStatus?.env_configured && !loading && (
+            <div className="flex items-start gap-2 p-3 rounded-xl text-[11px]"
+              style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", color: "#92400e" }}>
+              <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: "#f59e0b" }} />
+              <span>Configure <code className="font-mono">CONTA_AZUL_CLIENT_ID</code>, <code className="font-mono">CONTA_AZUL_CLIENT_SECRET</code> e <code className="font-mono">CONTA_AZUL_REDIRECT_URI</code> no <code className="font-mono">.env.local</code> antes de conectar.</span>
+            </div>
+          )}
+
+          {/* Erro de conexão OAuth — só exibe se último sync não foi sucesso */}
+          {(() => {
+            const lastSync   = caStatus?.recent_syncs?.[0] ?? null
+            const lastSyncOk = lastSync?.status === "success"
+            return caStatus?.connection?.error_message && !lastSyncOk && (
+              <div className="flex items-start gap-2 p-3 rounded-xl text-[11px]"
+                style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444" }}>
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                <span>{caStatus.connection.error_message}</span>
+              </div>
+            )
+          })()}
+
+          {feedback && (
+            <div className="flex items-start gap-2 p-3 rounded-xl text-[11px]"
+              style={{
+                background: feedback.kind === "ok" ? "rgba(22,163,74,0.06)" : "rgba(239,68,68,0.06)",
+                border: `1px solid ${feedback.kind === "ok" ? "rgba(22,163,74,0.2)" : "rgba(239,68,68,0.2)"}`,
+                color: feedback.kind === "ok" ? "#16a34a" : "#ef4444",
+              }}>
+              {feedback.kind === "ok"
+                ? <Check size={12} className="mt-0.5 shrink-0" />
+                : <AlertCircle size={12} className="mt-0.5 shrink-0" />}
+              <span>{feedback.msg}</span>
+            </div>
+          )}
+
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            {isConnected
+              ? "Conta Azul conectada via OAuth. Informe o endpoint de vendas, teste e use \"Usar este endpoint\" para ativar a sincronização."
+              : "A integração usa OAuth 2.0. Clique em Conectar para autorizar o acesso. Os tokens são armazenados apenas no servidor."}
+          </p>
+
+          {/* ── Testador de endpoint ────────────────────────────────────────── */}
+          {isConnected && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+                Endpoint de vendas
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={probePath}
+                  onChange={e => { setProbePath(e.target.value); setProbeResult(null) }}
+                  onKeyDown={e => { if (e.key === "Enter") void handleProbeOne() }}
+                  placeholder="/v1/sales"
+                  className="flex-1 rounded-xl px-3 py-1.5 text-xs border outline-none font-mono"
+                  style={{
+                    background:   "var(--bg-app)",
+                    borderColor:  "var(--border-color)",
+                    color:        "var(--text-primary)",
+                  }}
+                  disabled={probingPath}
+                />
+                <button
+                  onClick={() => void handleProbeOne()}
+                  disabled={probingPath || !probePath.trim()}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40 shrink-0"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+                >
+                  {probingPath
+                    ? <><Loader2 size={11} className="animate-spin" /> Testando...</>
+                    : "Testar"
+                  }
+                </button>
+              </div>
+              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                Ex: /v1/sales · /v1/financial-events · /v1/finance/receivable-events
+              </p>
+
+              {/* Resultado do teste */}
+              {probeResult && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl border text-[11px]"
+                  style={{
+                    borderColor: probeResult.ok ? "rgba(22,163,74,0.25)" : probeResult.rate_limited ? "rgba(245,158,11,0.25)" : "rgba(239,68,68,0.2)",
+                    background:  probeResult.ok ? "rgba(22,163,74,0.05)" : probeResult.rate_limited ? "rgba(245,158,11,0.05)" : "rgba(239,68,68,0.05)",
+                  }}
+                >
+                  <span className="mt-0.5 shrink-0 font-mono text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                    style={{
+                      background: probeResult.ok ? "rgba(22,163,74,0.15)" : "rgba(239,68,68,0.1)",
+                      color: probeResult.ok ? "#16a34a" : "#ef4444",
+                    }}>
+                    {probeResult.status || "ERR"}
+                  </span>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    {probeResult.ok ? (
+                      <>
+                        <p style={{ color: "#16a34a" }}>
+                          {probeResult.count !== null ? `${probeResult.count} registros retornados` : "Endpoint respondeu com sucesso"}
+                        </p>
+                        {probeResult.fields && probeResult.fields.length > 0 && (
+                          <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>
+                            Campos: {probeResult.fields.slice(0, 10).join(", ")}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p style={{ color: probeResult.rate_limited ? "#f59e0b" : "#ef4444" }}>
+                        {probeResult.error}
+                      </p>
+                    )}
+                  </div>
+                  {probeResult.ok && (
+                    <button
+                      onClick={() => void handleSaveEndpoint(probeResult.path)}
+                      disabled={savingEndpoint}
+                      className="shrink-0 text-[10px] px-2.5 py-1 rounded-lg border transition-all disabled:opacity-50 font-medium"
+                      style={{ borderColor: "rgba(22,163,74,0.3)", background: "rgba(22,163,74,0.12)", color: "#16a34a" }}
+                    >
+                      {savingEndpoint ? <Loader2 size={9} className="animate-spin" /> : "Usar este endpoint"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Endpoint ativo */}
+          {caStatus?.saved_endpoint && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-[10px]"
+              style={{ background: "rgba(22,163,74,0.06)", border: "1px solid rgba(22,163,74,0.15)" }}>
+              <Check size={11} style={{ color: "#16a34a" }} className="shrink-0" />
+              <span style={{ color: "var(--text-secondary)" }}>
+                Ativo: <code className="font-mono" style={{ color: "#16a34a" }}>{caStatus.saved_endpoint}</code>
+              </span>
+            </div>
+          )}
+
+          {/* Status da última sincronização */}
+          {(() => {
+            const lastSync = caStatus?.recent_syncs?.[0] ?? null
+            if (!lastSync || feedback) return null
+            if (lastSync.status === "running") {
+              return (
+                <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
+                  <Loader2 size={11} className="animate-spin shrink-0" />
+                  Sincronização em andamento...
+                </div>
+              )
+            }
+            if (lastSync.status === "success") {
+              const msg = lastSync.processed === 0
+                ? "Nenhuma venda encontrada no último período sincronizado."
+                : `Última sincronização: ${lastSync.inserted} inseridas de ${lastSync.processed} processadas.`
+              return (
+                <div className="flex items-center gap-2 text-[11px]" style={{ color: "#16a34a" }}>
+                  <Check size={11} className="shrink-0" />
+                  {msg}
+                </div>
+              )
+            }
+            // Último sync com erro
+            return (
+              <div className="flex items-start gap-2 p-2.5 rounded-xl text-[11px]"
+                style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.15)", color: "#ef4444" }}>
+                <AlertCircle size={11} className="mt-0.5 shrink-0" />
+                <span className="break-words">{lastSync.error_message ?? "Erro na última sincronização"}</span>
+              </div>
+            )
+          })()}
+
+          {/* Histórico recolhível */}
+          {caStatus && caStatus.recent_syncs.length > 1 && (
+            <div>
+              <button
+                onClick={() => setShowHistory(v => !v)}
+                className="flex items-center gap-1 text-[10px] transition-colors hover:opacity-80"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <span>{showHistory ? "▾" : "▸"}</span>
+                Histórico de sincronizações
+              </button>
+              {showHistory && (
+                <div className="mt-2 space-y-1">
+                  {caStatus.recent_syncs.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between text-[10px] py-0.5" style={{ color: "var(--text-muted)" }}>
+                      <span>{new Date(s.started_at).toLocaleString("pt-BR")}</span>
+                      <span style={{ color: s.status === "success" ? "#16a34a" : s.status === "error" ? "#ef4444" : "#f59e0b" }}>
+                        {s.status === "success"
+                          ? (s.processed === 0 ? "0 encontradas" : `${s.inserted} inseridas`)
+                          : s.status === "running"
+                          ? "Em andamento..."
+                          : s.error_message?.slice(0, 50) ?? "Erro"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Ações */}
+        <div className="flex items-center justify-between pt-1">
+          <div>
+            {isConnected && (
+              <button
+                onClick={() => void handleDisconnect()}
+                disabled={disconnecting || syncing}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-xl border transition-colors hover:bg-red-500/10 hover:border-red-500/30 disabled:opacity-40"
+                style={{ borderColor: "var(--border-color)", color: "#ef4444" }}
+              >
+                {disconnecting
+                  ? <><Loader2 size={11} className="animate-spin" /> Desconectando...</>
+                  : <><Link2Off size={11} /> Desconectar</>
+                }
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <>
+                <a
+                  href="/api/integrations/conta-azul/connect"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border transition-colors hover:bg-[var(--bg-hover)]"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+                >
+                  <Link2 size={11} /> Reconectar
+                </a>
+                <button
+                  onClick={() => void handleSync()}
+                  disabled={syncing || disconnecting}
+                  className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-xl font-semibold text-white transition-all disabled:opacity-60 bg-mota-600 hover:bg-mota-700"
+                >
+                  {syncing
+                    ? <><Loader2 size={11} className="animate-spin" /> Sincronizando...</>
+                    : <><RefreshCw size={11} /> Sincronizar</>
+                  }
+                </button>
+              </>
+            ) : (
+              <a
+                href="/api/integrations/conta-azul/connect"
+                className={cn(
+                  "flex items-center gap-1.5 text-xs px-4 py-1.5 rounded-xl font-semibold text-white transition-all bg-mota-600 hover:bg-mota-700",
+                  !caStatus?.env_configured && "opacity-50 pointer-events-none",
+                )}
+              >
+                <Link2 size={11} /> Conectar
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── APIs ─── */
 
 interface FieldDef {
@@ -1556,6 +2022,8 @@ function ApisTab() {
         <AlertCircle size={13} className="mt-0.5 shrink-0" style={{ color: "#f59e0b" }} />
         <span>Vault/criptografia em breve. As chaves são armazenadas em JSONB no banco de dados.</span>
       </div>
+
+      <ContaAzulCard />
 
       <div className="space-y-2">
         {APIS_CONFIG.map((def) => {

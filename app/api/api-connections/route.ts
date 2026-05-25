@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
+import { isGlobalAdmin }     from "@/lib/company-scope"
 
 const KNOWN_PROVIDERS = [
   "anthropic", "openai", "gemini", "supabase", "rocketchat",
@@ -78,6 +79,9 @@ export async function PATCH(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
+  const adminUser = await isGlobalAdmin(user.id)
+  if (!adminUser) return NextResponse.json({ error: "Acesso restrito a administradores." }, { status: 403 })
+
   const body = await req.json() as {
     provider: string
     config?:  Record<string, string>
@@ -142,6 +146,9 @@ export async function DELETE(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+
+  const adminUser = await isGlobalAdmin(user.id)
+  if (!adminUser) return NextResponse.json({ error: "Acesso restrito a administradores." }, { status: 403 })
 
   const body = await req.json() as { provider?: string; id?: string }
 

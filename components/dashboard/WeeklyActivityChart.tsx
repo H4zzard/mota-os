@@ -7,15 +7,15 @@ import {
 } from "recharts"
 import { Activity } from "lucide-react"
 import { useThemeContext } from "@/components/layout/ThemeProvider"
-import type { WeeklyPoint } from "@/app/(app)/dashboard/page"
+
+type WeeklyPoint = { day: string; sessions: number; workflows: number }
 
 const series = [
   { key: "sessions",  label: "Sessões",   color: "#16a34a" },
   { key: "workflows", label: "Workflows", color: "#8b5cf6" },
-  { key: "tasks",     label: "Tarefas",   color: "#f97316" },
 ]
 
-type SeriesKey = "sessions" | "workflows" | "tasks"
+type SeriesKey = "sessions" | "workflows"
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: { dataKey: string; name: string; value: number; color: string }[]; label?: string }) {
   if (!active || !payload?.length) return null
@@ -41,7 +41,7 @@ export function WeeklyActivityChart({ data }: { data: WeeklyPoint[] }) {
   const axisColor = theme === "dark" ? "#475569" : "#94a3b8"
   const gridColor = theme === "dark" ? "#1e293b" : "#f1f5f9"
 
-  const isEmpty = data.every(d => d.sessions === 0 && d.workflows === 0 && d.tasks === 0)
+  const isEmpty = data.every(d => d.sessions === 0 && d.workflows === 0)
 
   if (isEmpty) {
     return (

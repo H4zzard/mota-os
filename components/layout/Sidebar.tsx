@@ -28,99 +28,85 @@ import {
   PanelLeftOpen,
   Plus,
   Clock,
-  CheckSquare,
-  ClipboardList,
   LogOut,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase-browser"
+import { useCompany } from "@/components/providers/CompanyProvider"
 
 interface NavItem {
-  label: string
-  href?: string
-  icon: React.ElementType
-  children?: NavItem[]
-  badge?: number
+  label:      string
+  href?:      string
+  icon:       React.ElementType
+  children?:  NavItem[]
+  badge?:     number
+  adminOnly?: boolean
 }
 
-const navItems: NavItem[] = [
+const ALL_NAV_ITEMS: NavItem[] = [
   {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
+    label:     "Dashboard",
+    href:      "/dashboard",
+    icon:      LayoutDashboard,
+    adminOnly: true,
   },
   {
     label: "Chat",
-    href: "/chat",
-    icon: MessageSquare,
-    badge: 3,
+    href:  "/chat",
+    icon:  MessageSquare,
   },
   {
     label: "Sessões",
-    icon: Clock,
+    icon:  Clock,
     children: [
-      { label: "Todas as sessões", href: "/chat", icon: MessageSquare },
-      { label: "Marcadas", href: "/chat?filter=marked", icon: Bookmark },
-      { label: "Tags", href: "/chat?filter=tags", icon: Tag },
-      { label: "Arquivadas", href: "/chat?filter=archived", icon: Archive },
+      { label: "Todas as sessões", href: "/chat",                icon: MessageSquare },
+      { label: "Marcadas",         href: "/chat?filter=marked",  icon: Bookmark      },
+      { label: "Tags",             href: "/chat?filter=tags",    icon: Tag           },
+      { label: "Arquivadas",       href: "/chat?filter=archived",icon: Archive       },
     ],
   },
   {
     label: "Projetos",
-    href: "/projects",
-    icon: FolderOpen,
+    href:  "/projects",
+    icon:  FolderOpen,
   },
   {
     label: "Fontes",
-    icon: Database,
+    icon:  Database,
     children: [
-      { label: "APIs", href: "/sources?type=api", icon: Globe },
-      { label: "MCPs", href: "/sources?type=mcp", icon: Boxes },
+      { label: "APIs",          href: "/sources?type=api",    icon: Globe     },
+      { label: "MCPs",          href: "/sources?type=mcp",    icon: Boxes     },
       { label: "Pastas locais", href: "/sources?type=folder", icon: HardDrive },
-      { label: "Ver tudo", href: "/sources", icon: Database },
+      { label: "Ver tudo",      href: "/sources",             icon: Database  },
     ],
   },
   {
     label: "Agentes",
-    href: "/agents",
-    icon: Bot,
+    href:  "/agents",
+    icon:  Bot,
   },
   {
     label: "Automações",
-    icon: Zap,
+    icon:  Zap,
     children: [
-      { label: "Skills", href: "/automations?tab=skills", icon: Puzzle },
-      { label: "Workflows", href: "/workflows", icon: GitBranch },
-      { label: "Agendamentos", href: "/automations?tab=schedules", icon: CalendarClock },
-      { label: "Vigias", href: "/automations?tab=watchers", icon: Eye },
+      { label: "Skills",        href: "/automations?tab=skills",    icon: Puzzle      },
+      { label: "Workflows",     href: "/workflows",                  icon: GitBranch   },
+      { label: "Agendamentos",  href: "/automations?tab=schedules", icon: CalendarClock },
+      { label: "Vigias",        href: "/automations?tab=watchers",  icon: Eye         },
     ],
   },
-  {
-    label: "Tarefas",
-    href: "/tasks",
-    icon: CheckSquare,
-    badge: 7,
-  },
-  {
-    label: "Relatório Diário",
-    href: "/reports/daily",
-    icon: ClipboardList,
-  },
-]
-
-const bottomItems: NavItem[] = [
-  { label: "Novidades", href: "/changelog", icon: Sparkles },
-  { label: "Configurações", href: "/settings", icon: Settings },
 ]
 
 interface SidebarProps {
   collapsed: boolean
-  onToggle: () => void
+  onToggle:  () => void
 }
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
-  const pathname = usePathname()
-  const router   = useRouter()
+  const pathname  = usePathname()
+  const router    = useRouter()
+  const { isAdmin, loading: companyLoading } = useCompany()
+
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     new Set(["Sessões", "Automações"])
   )
@@ -141,14 +127,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   useEffect(() => {
     function fetchUnread() {
-      fetch('/api/announcements/unread-count')
+      fetch("/api/announcements/unread-count")
         .then(r => r.json())
-        .then(data => setUnreadNews(typeof data.count === 'number' ? data.count : 0))
+        .then(data => setUnreadNews(typeof data.count === "number" ? data.count : 0))
         .catch(() => {})
     }
     fetchUnread()
-    window.addEventListener('announcements-read', fetchUnread)
-    return () => window.removeEventListener('announcements-read', fetchUnread)
+    window.addEventListener("announcements-read", fetchUnread)
+    return () => window.removeEventListener("announcements-read", fetchUnread)
   }, [])
 
   async function handleLogout() {
@@ -159,13 +145,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   }
 
   function toggleGroup(label: string) {
-    setOpenGroups((prev) => {
+    setOpenGroups(prev => {
       const next = new Set(prev)
-      if (next.has(label)) {
-        next.delete(label)
-      } else {
-        next.add(label)
-      }
+      next.has(label) ? next.delete(label) : next.add(label)
       return next
     })
   }
@@ -176,15 +158,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return pathname === base || (base !== "/" && pathname.startsWith(base))
   }
 
+  // Filtrar itens baseado no role (enquanto carrega, ocultar adminOnly)
+  const navItems = companyLoading
+    ? ALL_NAV_ITEMS.filter(i => !i.adminOnly)
+    : ALL_NAV_ITEMS.filter(i => !i.adminOnly || isAdmin)
+
   return (
     <motion.aside
       animate={{ width: collapsed ? 64 : 240 }}
       transition={{ duration: 0.2, ease: "easeInOut" }}
       className="flex flex-col h-full shrink-0 overflow-hidden border-r"
-      style={{
-        background: "var(--bg-sidebar)",
-        borderColor: "var(--border-color)",
-      }}
+      style={{ background: "var(--bg-sidebar)", borderColor: "var(--border-color)" }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 h-14 shrink-0 border-b" style={{ borderColor: "var(--border-color)" }}>
@@ -260,7 +244,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-        {navItems.map((item) => (
+        {navItems.map(item => (
           <NavEntry
             key={item.label}
             item={item}
@@ -274,9 +258,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         <div className="my-2 border-t" style={{ borderColor: "var(--border-color)" }} />
 
         {([
-            { label: "Novidades", href: "/changelog", icon: Sparkles, badge: unreadNews > 0 ? unreadNews : undefined },
-            { label: "Configurações", href: "/settings", icon: Settings },
-          ] as NavItem[]).map((item) => (
+          { label: "Novidades",      href: "/changelog", icon: Sparkles, badge: unreadNews > 0 ? unreadNews : undefined },
+          { label: "Configurações",  href: "/settings",  icon: Settings },
+        ] as NavItem[]).map(item => (
           <NavEntry
             key={item.label}
             item={item}
@@ -289,16 +273,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </nav>
 
       {/* User */}
-      <div
-        className="px-2.5 py-3 border-t shrink-0"
-        style={{ borderColor: "var(--border-color)" }}
-      >
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg px-2 py-2",
-            collapsed && "justify-center"
-          )}
-        >
+      <div className="px-2.5 py-3 border-t shrink-0" style={{ borderColor: "var(--border-color)" }}>
+        <div className={cn("flex items-center gap-2.5 rounded-lg px-2 py-2", collapsed && "justify-center")}>
           <div className="w-7 h-7 rounded-full bg-mota-600 flex items-center justify-center shrink-0">
             <span className="text-white text-xs font-semibold">{userInitial}</span>
           </div>
@@ -344,18 +320,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 }
 
 interface NavEntryProps {
-  item: NavItem
-  collapsed: boolean
-  isActive: (href?: string) => boolean
-  openGroups: Set<string>
+  item:        NavItem
+  collapsed:   boolean
+  isActive:    (href?: string) => boolean
+  openGroups:  Set<string>
   toggleGroup: (label: string) => void
-  depth?: number
+  depth?:      number
 }
 
 function NavEntry({ item, collapsed, isActive, openGroups, toggleGroup, depth = 0 }: NavEntryProps) {
   const hasChildren = !!item.children?.length
-  const isOpen = openGroups.has(item.label)
-  const active = isActive(item.href)
+  const isOpen  = openGroups.has(item.label)
+  const active  = isActive(item.href)
 
   if (hasChildren && !collapsed) {
     return (
@@ -371,10 +347,7 @@ function NavEntry({ item, collapsed, isActive, openGroups, toggleGroup, depth = 
         >
           <item.icon size={15} className="shrink-0" />
           <span className="flex-1 text-sm truncate">{item.label}</span>
-          <motion.div
-            animate={{ rotate: isOpen ? 180 : 0 }}
-            transition={{ duration: 0.15 }}
-          >
+          <motion.div animate={{ rotate: isOpen ? 180 : 0 }} transition={{ duration: 0.15 }}>
             <ChevronDown size={13} />
           </motion.div>
         </button>
@@ -389,7 +362,7 @@ function NavEntry({ item, collapsed, isActive, openGroups, toggleGroup, depth = 
               className="overflow-hidden"
             >
               <div className="pl-3 space-y-0.5 pt-0.5">
-                {item.children!.map((child) => (
+                {item.children!.map(child => (
                   <NavEntry
                     key={child.label}
                     item={child}

@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
 
   const url        = new URL(req.url)
   const eventType  = url.searchParams.get("event_type") ?? ""
+  const companyId  = url.searchParams.get("company_id") ?? ""
   const limitParam = parseInt(url.searchParams.get("limit") ?? "50")
   const offsetParam = parseInt(url.searchParams.get("offset") ?? "0")
   const limit  = Math.min(isNaN(limitParam)  ? 50  : limitParam,  200)
@@ -42,6 +43,10 @@ export async function GET(req: NextRequest) {
 
   if (eventType && (EVENT_TYPES as readonly string[]).includes(eventType)) {
     query = query.eq("event_type", eventType)
+  }
+
+  if (companyId) {
+    query = query.eq("company_id", companyId)
   }
 
   const { data: logs, error } = await query

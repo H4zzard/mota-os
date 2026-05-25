@@ -4,7 +4,7 @@ import Link from "next/link"
 import { MessageSquare } from "lucide-react"
 import { motion } from "framer-motion"
 import { AgentTag } from "@/components/ui/StatusBadge"
-import type { RecentSessionItem } from "@/app/(app)/dashboard/page"
+type RecentSessionItem = { id: string; title: string; agentName: string | null; agentColor: string | null; companyName: string; timeAgo: string }
 
 export function RecentSessionsList({ sessions }: { sessions: RecentSessionItem[] }) {
   if (sessions.length === 0) {

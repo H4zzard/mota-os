@@ -7,15 +7,17 @@ const nextConfig: NextConfig = {
   },
 
   allowedDevOrigins: [
-    "valid-titanium-clearly-appearance.trycloudflare.com",
-    "*.trycloudflare.com",
+    "x8b8ttvn-3000.brs.devtunnels.ms",
+    "*.devtunnels.ms",
+    "*.brs.devtunnels.ms",
   ],
 
   experimental: {
     serverActions: {
       allowedOrigins: [
-        "valid-titanium-clearly-appearance.trycloudflare.com",
-        "*.trycloudflare.com",
+        "x8b8ttvn-3000.brs.devtunnels.ms",
+        "*.devtunnels.ms",
+        "*.brs.devtunnels.ms",
       ],
     },
   },

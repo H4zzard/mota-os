@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
-
-export const dynamic = 'force-dynamic'
 import { createAdminClient } from "@/lib/supabase-admin"
-import { getAllowedCompanyIds, getCurrentCompany, ALL_SLUGS } from "@/lib/company-scope"
+import {
+  getAllowedCompanyIds,
+  getCurrentCompany,
+  isParentCompany,
+  ALL_SLUGS,
+  getUserRole,
+} from "@/lib/company-scope"
 import { logActivity } from "@/lib/activity-logger"
 
-// ─── GET — empresa ativa e lista permitida ────────────────────────────────────
+export const dynamic = "force-dynamic"
+
+// ─── GET — empresa ativa, lista permitida e role do usuário ───────────────────
 
 export async function GET() {
   const supabase = await createClient()
@@ -15,9 +21,10 @@ export async function GET() {
 
   const admin = createAdminClient()
 
-  const [currentSlug, allowedSlugs] = await Promise.all([
+  const [currentSlug, allowedSlugs, userRole] = await Promise.all([
     getCurrentCompany(user.id),
     getAllowedCompanyIds(user.id),
+    getUserRole(user.id),
   ])
 
   const { data: companies } = await admin
@@ -34,7 +41,11 @@ export async function GET() {
 
   const current = companyMap.get(currentSlug) ?? null
 
-  return NextResponse.json({ company: current, allowed: allowed ?? [] })
+  return NextResponse.json({
+    company: current,
+    allowed: allowed ?? [],
+    role:    userRole,
+  })
 }
 
 // ─── PATCH — atualizar empresa ativa ─────────────────────────────────────────
@@ -48,6 +59,17 @@ export async function PATCH(req: NextRequest) {
 
   if (!company_id || !(ALL_SLUGS as string[]).includes(company_id)) {
     return NextResponse.json({ error: "company_id inválido" }, { status: 400 })
+  }
+
+  const userRole = await getUserRole(user.id)
+  const isAdmin  = userRole === "admin"
+
+  // Grupo Mota apenas para admin
+  if (isParentCompany(company_id) && !isAdmin) {
+    return NextResponse.json(
+      { error: "Grupo Mota é uma visão administrativa e não está disponível para seu perfil." },
+      { status: 403 }
+    )
   }
 
   const allowed = await getAllowedCompanyIds(user.id)

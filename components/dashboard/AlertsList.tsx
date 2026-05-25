@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { AlertTriangle, CheckCircle2, X } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import type { WorkflowErrorItem } from "@/app/(app)/dashboard/page"
+type WorkflowErrorItem = { id: string; name: string; errorMessage: string; timeAgo: string }
 
 export function AlertsList({ errors }: { errors: WorkflowErrorItem[] }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())

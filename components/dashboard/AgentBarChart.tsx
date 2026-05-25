@@ -6,7 +6,8 @@ import {
 } from "recharts"
 import { Bot } from "lucide-react"
 import { useThemeContext } from "@/components/layout/ThemeProvider"
-import type { AgentUsageItem } from "@/app/(app)/dashboard/page"
+
+type AgentUsageItem = { name: string; fullName: string; uses: number; color: string }
 
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: { value: number; color: string; payload: AgentUsageItem }[] }) {
   if (!active || !payload?.length) return null

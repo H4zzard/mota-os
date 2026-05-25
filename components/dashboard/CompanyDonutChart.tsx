@@ -2,7 +2,7 @@
 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
 import { TrendingUp } from "lucide-react"
-import type { CompanyUsageItem } from "@/app/(app)/dashboard/page"
+type CompanyUsageItem = { name: string; value: number; color: string }
 
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: { name: string; value: number; payload: CompanyUsageItem }[] }) {
   if (!active || !payload?.length) return null

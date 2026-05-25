@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { GitBranch, ArrowUpRight } from "lucide-react"
-import type { WorkflowRunItem } from "@/app/(app)/dashboard/page"
+type WorkflowRunItem = { name: string; slug: string; runs: number }
 
 export function WorkflowActivity({ data }: { data: WorkflowRunItem[] }) {
   return (

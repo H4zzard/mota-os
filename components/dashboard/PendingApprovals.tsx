@@ -1,9 +1,18 @@
 "use client"
 
+// Componente mantido para compatibilidade futura, mas não exibido no dashboard atual.
 import { useState } from "react"
 import { Check, X, Clock, CheckSquare } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
-import type { PendingTaskItem } from "@/app/(app)/dashboard/page"
+
+interface PendingTaskItem {
+  id:          string
+  title:       string
+  companyId:   string | null
+  companyName: string
+  priority:    string
+  timeAgo:     string
+}
 
 const priorityColor: Record<string, string> = {
   urgente: "#ef4444",

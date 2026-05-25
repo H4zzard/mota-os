@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   X, ChevronRight, Check, Play, Sparkles, ArrowLeft,
-  Copy, Download, ListTodo, MessageSquare, RefreshCw, AlertCircle,
+  Copy, Download, MessageSquare, RefreshCw, AlertCircle,
   Database, Send,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -45,7 +45,6 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
   const [runId,     setRunId]     = useState<string | null>(null)
   const [errorMsg,  setErrorMsg]  = useState("")
   const [copied,       setCopied]       = useState(false)
-  const [taskSaved,    setTaskSaved]    = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [sourceSaved,  setSourceSaved]  = useState<"idle" | "saving" | "saved" | "error">("idle")
   const [rcSent,       setRcSent]       = useState<"idle" | "sending" | "sent" | "error">("idle")
 
@@ -55,7 +54,7 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
   useEffect(() => {
     setStep(0); setValues({}); setPhase("form")
     setResult(""); setRunId(null); setErrorMsg("")
-    setCopied(false); setTaskSaved("idle")
+    setCopied(false)
     setSourceSaved("idle"); setRcSent("idle")
   }, [wf?.id])
 
@@ -99,7 +98,7 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
     abortRef.current?.abort()
     setStep(0); setValues({}); setPhase("form")
     setResult(""); setRunId(null); setErrorMsg("")
-    setCopied(false); setTaskSaved("idle")
+    setCopied(false)
     setSourceSaved("idle"); setRcSent("idle")
   }
 
@@ -176,22 +175,6 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
     a.download = `${w.name.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.txt`
     a.click()
     URL.revokeObjectURL(url)
-  }
-
-  async function saveAsTask() {
-    if (!runId || (taskSaved !== "idle" && taskSaved !== "error")) return
-    setTaskSaved("saving")
-    try {
-      const date = new Date().toLocaleDateString("pt-BR")
-      const res  = await fetch(`/api/workflow-runs/${runId}/save-as-task`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ title: `[${w.name}] ${date}` }),
-      })
-      setTaskSaved(res.ok ? "saved" : "error")
-    } catch {
-      setTaskSaved("error")
-    }
   }
 
   async function saveAsSource() {
@@ -421,19 +404,6 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
                         >
                           <Download size={12} />
                           Exportar .txt
-                        </button>
-
-                        <button
-                          onClick={() => { if (taskSaved === "idle" || taskSaved === "error") void saveAsTask() }}
-                          disabled={taskSaved === "saving" || taskSaved === "saved" || !runId}
-                          className="flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-medium transition-all hover:bg-[var(--bg-hover)] disabled:opacity-60"
-                          style={{
-                            borderColor: taskSaved === "error" ? "#f87171" : "var(--border-color)",
-                            color:       taskSaved === "error" ? "#f87171" : "var(--text-secondary)",
-                          }}
-                        >
-                          <ListTodo size={12} />
-                          {taskSaved === "saving" ? "Salvando..." : taskSaved === "saved" ? "Tarefa salva!" : taskSaved === "error" ? "Tentar de novo" : "Salvar como tarefa"}
                         </button>
 
                         <button

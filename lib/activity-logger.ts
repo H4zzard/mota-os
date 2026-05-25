@@ -18,7 +18,7 @@ export type LogEventType =
   | "api"
 
 export interface LogActivityParams {
-  userId:     string
+  userId?:    string | null
   eventType:  LogEventType
   action:     string
   detail?:    string
@@ -31,7 +31,7 @@ export async function logActivity(params: LogActivityParams): Promise<void> {
   try {
     const admin = createAdminClient()
     await admin.from("activity_logs").insert({
-      user_id:    params.userId,
+      user_id:    params.userId ?? null,
       event_type: params.eventType,
       action:     params.action,
       detail:     params.detail ?? "",
