@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   X, ChevronRight, Check, Play, Sparkles, ArrowLeft,
   Copy, Download, ListTodo, MessageSquare, RefreshCw, AlertCircle,
+  Database, Send,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -43,8 +44,10 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
   const [result,    setResult]    = useState("")
   const [runId,     setRunId]     = useState<string | null>(null)
   const [errorMsg,  setErrorMsg]  = useState("")
-  const [copied,    setCopied]    = useState(false)
-  const [taskSaved, setTaskSaved] = useState(false)
+  const [copied,       setCopied]       = useState(false)
+  const [taskSaved,    setTaskSaved]    = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [sourceSaved,  setSourceSaved]  = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [rcSent,       setRcSent]       = useState<"idle" | "sending" | "sent" | "error">("idle")
 
   const abortRef = useRef<AbortController | null>(null)
 
@@ -52,7 +55,8 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
   useEffect(() => {
     setStep(0); setValues({}); setPhase("form")
     setResult(""); setRunId(null); setErrorMsg("")
-    setCopied(false); setTaskSaved(false)
+    setCopied(false); setTaskSaved("idle")
+    setSourceSaved("idle"); setRcSent("idle")
   }, [wf?.id])
 
   if (!wf) return null
@@ -95,7 +99,8 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
     abortRef.current?.abort()
     setStep(0); setValues({}); setPhase("form")
     setResult(""); setRunId(null); setErrorMsg("")
-    setCopied(false); setTaskSaved(false)
+    setCopied(false); setTaskSaved("idle")
+    setSourceSaved("idle"); setRcSent("idle")
   }
 
   // ─── Execução SSE ─────────────────────────────────────────────────────────
@@ -174,21 +179,61 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
   }
 
   async function saveAsTask() {
-    const date  = new Date().toLocaleDateString("pt-BR")
-    const title = `[${w.name}] ${date}`
-    await fetch("/api/tasks", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        title,
-        description: result.slice(0, 1000),
-        status:      "todo",
-        priority:    "media",
-        tags:        [cat],
-        position:    0,
-      }),
-    })
-    setTaskSaved(true)
+    if (!runId || (taskSaved !== "idle" && taskSaved !== "error")) return
+    setTaskSaved("saving")
+    try {
+      const date = new Date().toLocaleDateString("pt-BR")
+      const res  = await fetch(`/api/workflow-runs/${runId}/save-as-task`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ title: `[${w.name}] ${date}` }),
+      })
+      setTaskSaved(res.ok ? "saved" : "error")
+    } catch {
+      setTaskSaved("error")
+    }
+  }
+
+  async function saveAsSource() {
+    if (!runId || (sourceSaved !== "idle" && sourceSaved !== "error")) return
+    setSourceSaved("saving")
+    try {
+      const date = new Date().toLocaleDateString("pt-BR")
+      const res  = await fetch(`/api/workflow-runs/${runId}/save-as-source`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          name:        `[${w.name}] ${date}`,
+          description: `Resultado do workflow "${w.name}" gerado em ${date}`,
+          type:        "document",
+        }),
+      })
+      setSourceSaved(res.ok ? "saved" : "error")
+    } catch {
+      setSourceSaved("error")
+    }
+  }
+
+  async function sendToRC() {
+    if (rcSent !== "idle" && rcSent !== "error") return
+    setRcSent("sending")
+    try {
+      const date    = new Date().toLocaleDateString("pt-BR")
+      const message = `📋 *${w.name}* — ${date}\n\n${result}`
+      const res     = await fetch("/api/integrations/rocketchat/send", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          message,
+          destination_type: "workflow",
+          source_type:      "workflow_run",
+          source_id:        runId ?? undefined,
+        }),
+      })
+      setRcSent(res.ok ? "sent" : "error")
+    } catch {
+      setRcSent("error")
+    }
   }
 
   function openInChat() {
@@ -379,13 +424,42 @@ export function WorkflowModal({ workflow: wf, onClose }: WorkflowModalProps) {
                         </button>
 
                         <button
-                          onClick={saveAsTask}
-                          disabled={taskSaved}
+                          onClick={() => { if (taskSaved === "idle" || taskSaved === "error") void saveAsTask() }}
+                          disabled={taskSaved === "saving" || taskSaved === "saved" || !runId}
                           className="flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-medium transition-all hover:bg-[var(--bg-hover)] disabled:opacity-60"
-                          style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+                          style={{
+                            borderColor: taskSaved === "error" ? "#f87171" : "var(--border-color)",
+                            color:       taskSaved === "error" ? "#f87171" : "var(--text-secondary)",
+                          }}
                         >
                           <ListTodo size={12} />
-                          {taskSaved ? "Tarefa salva!" : "Salvar como tarefa"}
+                          {taskSaved === "saving" ? "Salvando..." : taskSaved === "saved" ? "Tarefa salva!" : taskSaved === "error" ? "Tentar de novo" : "Salvar como tarefa"}
+                        </button>
+
+                        <button
+                          onClick={() => { if (sourceSaved === "idle" || sourceSaved === "error") void saveAsSource() }}
+                          disabled={sourceSaved === "saving" || sourceSaved === "saved" || !runId}
+                          className="flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-medium transition-all hover:bg-[var(--bg-hover)] disabled:opacity-60"
+                          style={{
+                            borderColor: sourceSaved === "error" ? "#f87171" : "var(--border-color)",
+                            color:       sourceSaved === "error" ? "#f87171" : "var(--text-secondary)",
+                          }}
+                        >
+                          <Database size={12} />
+                          {sourceSaved === "saving" ? "Salvando..." : sourceSaved === "saved" ? "Fonte salva!" : sourceSaved === "error" ? "Tentar de novo" : "Salvar como fonte"}
+                        </button>
+
+                        <button
+                          onClick={() => { if (rcSent === "idle" || rcSent === "error") void sendToRC() }}
+                          disabled={rcSent === "sending" || rcSent === "sent"}
+                          className="flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-medium transition-all hover:bg-[var(--bg-hover)] disabled:opacity-60"
+                          style={{
+                            borderColor: rcSent === "error" ? "#f87171" : "var(--border-color)",
+                            color:       rcSent === "error" ? "#f87171" : "var(--text-secondary)",
+                          }}
+                        >
+                          <Send size={12} />
+                          {rcSent === "sending" ? "Enviando..." : rcSent === "sent" ? "Enviado!" : rcSent === "error" ? "Tentar de novo" : "Enviar para RC"}
                         </button>
 
                         <button

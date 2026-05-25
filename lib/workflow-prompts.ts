@@ -1,4 +1,4 @@
-import type { WorkflowStep } from "@/lib/mocks/workflows"
+import type { WorkflowStep } from "@/lib/workflow-types"
 
 // ─── Instruções específicas por workflow ──────────────────────────────────────
 

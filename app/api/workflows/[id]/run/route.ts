@@ -5,6 +5,7 @@ import { streamChat }        from "@/lib/ai-service"
 import { logActivity }       from "@/lib/activity-logger"
 import { getAllowedCompanyIds, getCurrentCompany } from "@/lib/company-scope"
 import { buildWorkflowPrompt } from "@/lib/workflow-prompts"
+import { embedText }           from "@/lib/rag/embeddings"
 import type { WorkflowStep } from "@/lib/workflow-types"
 
 function sse(data: object): Uint8Array {
@@ -118,6 +119,31 @@ export async function POST(
     )
     systemPrompt = agentSystem ?? built.system
     userPrompt   = built.user
+  }
+
+  // ── Injetar contexto RAG (best-effort — nunca bloqueia o workflow) ──────────
+  if (company) {
+    try {
+      const searchQuery = userPrompt.slice(0, 1500)
+      const queryEmbedding = await embedText(searchQuery)
+
+      const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+        query_embedding:   `[${queryEmbedding.join(",")}]`,
+        match_count:       5,
+        filter_company:    company,
+        filter_agent_id:   agentId,
+        filter_source_ids: null,
+        min_similarity:    0.40,
+      })
+
+      if (chunks && (chunks as unknown[]).length > 0) {
+        const parts = (chunks as { title?: string | null; content: string }[])
+          .map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
+        systemPrompt += `\n\nFONTES DE CONHECIMENTO RELEVANTES:\n${parts.join("\n\n---\n\n")}\n`
+      }
+    } catch {
+      // Falha de RAG nunca bloqueia a execução do workflow
+    }
   }
 
   // Criar registro no banco com status "running"

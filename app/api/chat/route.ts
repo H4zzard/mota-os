@@ -3,6 +3,7 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat, type AIProvider } from "@/lib/ai-service"
 import { logActivity }                 from "@/lib/activity-logger"
+import { embedText }                   from "@/lib/rag/embeddings"
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -90,49 +91,87 @@ export async function POST(req: NextRequest) {
     sid = sess.id as string
   }
 
-  // ─── Contexto de conhecimento ─────────────────────────────────────────────
+  // ─── Contexto de conhecimento (RAG semântico + fallback full-text) ──────────
   {
-    const CONTEXT_CHAR_LIMIT = 40_000 // ~10k tokens — seguro para qualquer modelo
-
     try {
       const { data: rows } = await admin
         .from("session_sources")
-        .select("knowledge_sources(name, type, content)")
+        .select("source_id, knowledge_sources(id, name, type, content, embedding_status)")
         .eq("session_id", sid)
 
       if (rows && rows.length > 0) {
-        const parts: string[] = []
-        let totalChars = 0
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sources = rows.map(r => (r as any).knowledge_sources as {
+          id: string; name: string; type: string; content: string | null; embedding_status: string | null
+        } | null).filter(Boolean) as { id: string; name: string; type: string; content: string | null; embedding_status: string | null }[]
 
-        for (const row of rows) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const src = (row as any).knowledge_sources as { name: string; type: string; content: string | null } | null
-          if (!src?.content) continue
+        const indexedIds = sources.filter(s => s.embedding_status === "done").map(s => s.id)
+        let injectedCtx = false
 
-          const remaining = CONTEXT_CHAR_LIMIT - totalChars
-          if (remaining <= 0) break
+        // ── Tentativa RAG semântico ─────────────────────────────────────
+        if (indexedIds.length > 0) {
+          try {
+            const queryEmbedding = await embedText(body.user_message.slice(0, 2000))
+            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+              query_embedding:   `[${queryEmbedding.join(",")}]`,
+              match_count:       8,
+              filter_company:    body.company_id ?? null,
+              filter_agent_id:   null,
+              filter_source_ids: indexedIds,
+              min_similarity:    0.35,
+            })
 
-          const excerpt = src.content.slice(0, remaining)
-          parts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
-          totalChars += excerpt.length
+            if (chunks && chunks.length > 0) {
+              const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
+                .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
+              const ctx = `\n\nFONTES DE CONHECIMENTO (busca semântica — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
+              system = (system ?? "") + ctx
+              injectedCtx = true
+
+              void logActivity({
+                userId:    user.id,
+                eventType: "source",
+                action:    "chat_rag_injected",
+                detail:    `${parts.length} trecho(s) semântico(s)`,
+                sessionId: sid as string,
+                companyId: body.company_id,
+              })
+            }
+          } catch (ragErr) {
+            console.warn("[chat] RAG falhou, usando fallback full-text:", ragErr)
+          }
         }
 
-        if (parts.length > 0) {
-          const ctx = `\n\nFONTES DE CONHECIMENTO ATIVAS:\n${parts.join("\n\n")}\n`
-          system = (system ?? "") + ctx
+        // ── Fallback: injetar conteúdo completo (fontes sem embedding) ──
+        if (!injectedCtx) {
+          const CONTEXT_CHAR_LIMIT = 40_000
+          const parts: string[] = []
+          let totalChars = 0
 
-          void logActivity({
-            userId:    user.id,
-            eventType: "source",
-            action:    "Chat usou fontes de conhecimento",
-            detail:    `${parts.length} fonte(s) injetada(s) — ${totalChars} chars`,
-            sessionId: sid as string,
-          })
+          for (const src of sources) {
+            if (!src.content) continue
+            const remaining = CONTEXT_CHAR_LIMIT - totalChars
+            if (remaining <= 0) break
+            const excerpt = src.content.slice(0, remaining)
+            parts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
+            totalChars += excerpt.length
+          }
+
+          if (parts.length > 0) {
+            system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS:\n${parts.join("\n\n")}\n`
+
+            void logActivity({
+              userId:    user.id,
+              eventType: "source",
+              action:    "chat_fulltext_injected",
+              detail:    `${parts.length} fonte(s) — ${totalChars} chars`,
+              sessionId: sid as string,
+            })
+          }
         }
       }
     } catch (ctxErr) {
-      // Falha ao buscar fontes nunca bloqueia o chat
-      console.warn("[chat] Erro ao buscar session_sources:", ctxErr)
+      console.warn("[chat] Erro ao buscar contexto de conhecimento:", ctxErr)
     }
   }
 

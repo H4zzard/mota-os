@@ -5,24 +5,26 @@ import { motion, AnimatePresence } from "framer-motion"
 import {
   Database, Plus, Search, BookOpen, HelpCircle,
   FileText, Package, AlertTriangle, File, Link as LinkIcon,
-  X, Upload, Edit2, Archive, Eye, Loader2,
+  X, Upload, Edit2, Archive, Eye, Loader2, Zap,
 } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
 import { useCompany } from "@/components/providers/CompanyProvider"
 import { cn } from "@/lib/utils"
 
 interface KnowledgeSource {
-  id: string
-  company_id: string
-  name: string
-  description: string | null
-  type: string
-  status: "active" | "archived"
-  content: string | null
-  metadata: Record<string, unknown>
-  created_by: string | null
-  created_at: string
-  updated_at: string
+  id:               string
+  company_id:       string
+  name:             string
+  description:      string | null
+  type:             string
+  status:           "active" | "archived"
+  content:          string | null
+  metadata:         Record<string, unknown>
+  created_by:       string | null
+  created_at:       string
+  updated_at:       string
+  embedding_status: string | null
+  content_hash:     string | null
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -89,18 +91,68 @@ const TYPE_FILTERS: { label: string; value: FilterValue; types?: string[] }[] = 
   { label: "Links",      value: "link",      types: ["link"] },
 ]
 
+// ─── Embedding status badge ───────────────────────────────────────────────────
+
+function EmbeddingBadge({ status }: { status: string | null }) {
+  if (!status || status === "pending") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(156,163,175,0.12)", color: "var(--text-muted)" }}>
+      Sem índice
+    </span>
+  )
+  if (status === "processing") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1"
+      style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8" }}>
+      <Loader2 size={8} className="animate-spin" /> Indexando
+    </span>
+  )
+  if (status === "done") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(34,197,94,0.12)", color: "#4ade80" }}>
+      Indexado
+    </span>
+  )
+  return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(239,68,68,0.12)", color: "#f87171" }}>
+      Erro
+    </span>
+  )
+}
+
 // ─── Source card ──────────────────────────────────────────────────────────────
 
-function SourceCard({ source, index, onEdit, onArchive, onView }: {
-  source: KnowledgeSource
-  index: number
-  onEdit: (s: KnowledgeSource) => void
-  onArchive: (id: string) => void
-  onView: (s: KnowledgeSource) => void
+function SourceCard({ source, index, onEdit, onArchive, onView, onReindexed }: {
+  source:      KnowledgeSource
+  index:       number
+  onEdit:      (s: KnowledgeSource) => void
+  onArchive:   (id: string) => void
+  onView:      (s: KnowledgeSource) => void
+  onReindexed: (id: string, status: string) => void
 }) {
   const Icon  = TYPE_ICONS[source.type] ?? FileText
   const color = TYPE_COLORS[source.type] ?? "#6b7280"
   const label = TYPE_LABELS[source.type] ?? source.type
+  const [indexing, setIndexing] = useState(false)
+
+  async function handleIndex(force = false) {
+    if (indexing || !source.content) return
+    setIndexing(true)
+    onReindexed(source.id, "processing")
+    try {
+      const res = await fetch("/api/rag/index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_type: "knowledge_source", source_id: source.id, force }),
+      })
+      const json = await res.json() as { ok?: boolean; error?: string }
+      onReindexed(source.id, res.ok && json.ok ? "done" : "error")
+    } catch {
+      onReindexed(source.id, "error")
+    } finally {
+      setIndexing(false)
+    }
+  }
 
   return (
     <motion.div
@@ -144,9 +196,12 @@ function SourceCard({ source, index, onEdit, onArchive, onView }: {
           </p>
         )}
 
-        <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-          Atualizado em {new Date(source.updated_at).toLocaleDateString("pt-BR")}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+            Atualizado em {new Date(source.updated_at).toLocaleDateString("pt-BR")}
+          </p>
+          <EmbeddingBadge status={source.embedding_status} />
+        </div>
       </div>
 
       <div
@@ -160,6 +215,17 @@ function SourceCard({ source, index, onEdit, onArchive, onView }: {
         >
           <Eye size={12} /> Ver
         </button>
+        {source.content && (
+          <button
+            onClick={() => handleIndex(source.embedding_status === "done")}
+            disabled={indexing || source.embedding_status === "processing"}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border transition-all hover:bg-[var(--bg-hover)] disabled:opacity-40"
+            style={{ borderColor: "var(--border-color)", color: source.embedding_status === "done" ? "#4ade80" : "var(--text-muted)" }}
+            title={source.embedding_status === "done" ? "Reindexar" : "Indexar para busca semântica"}
+          >
+            {indexing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+          </button>
+        )}
         <button
           onClick={() => onEdit(source)}
           className="w-8 h-8 flex items-center justify-center rounded-lg border transition-all hover:bg-[var(--bg-hover)]"
@@ -702,6 +768,9 @@ export default function SourcesPage() {
                   onEdit={setEditSource}
                   onArchive={handleArchive}
                   onView={setViewSource}
+                  onReindexed={(id, status) =>
+                    setSources(prev => prev.map(x => x.id === id ? { ...x, embedding_status: status } : x))
+                  }
                 />
               ))}
             </div>

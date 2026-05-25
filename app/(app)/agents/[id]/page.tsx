@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import {
   ArrowLeft, Bot, Save, Trash2, Plus, X,
-  Building2, FileText, Zap, Settings, Cpu,
+  Building2, FileText, Zap, Settings, Cpu, Loader2,
 } from "lucide-react"
 import type { ApiAgent, ApiAgentFile, ApiAgentCompany } from "@/lib/agent-helpers"
 import { cn } from "@/lib/utils"
@@ -168,6 +168,9 @@ export default function AgentDetailPage() {
               files={files}
               onUploaded={(f) => setFiles(prev => [...prev, f])}
               onDeleted={(fileId) => setFiles(prev => prev.filter(f => f.id !== fileId))}
+              onFileUpdated={(fileId, patch) =>
+                setFiles(prev => prev.map(f => f.id === fileId ? { ...f, ...patch } : f))
+              }
             />
           )}
           {tab === "capacidades" && (
@@ -364,17 +367,48 @@ function TabEmpresas({ companies, onAttach, onDetach }: {
   )
 }
 
+// ─── Embedding status badge (arquivos) ───────────────────────────────────────
+
+function FileEmbeddingBadge({ status }: { status: string | null }) {
+  if (!status || status === "pending") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(156,163,175,0.12)", color: "var(--text-muted)" }}>
+      Sem índice
+    </span>
+  )
+  if (status === "processing") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1"
+      style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8" }}>
+      <Loader2 size={8} className="animate-spin" /> Indexando
+    </span>
+  )
+  if (status === "done") return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(34,197,94,0.12)", color: "#4ade80" }}>
+      Indexado
+    </span>
+  )
+  return (
+    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+      style={{ background: "rgba(239,68,68,0.12)", color: "#f87171" }}>
+      Erro
+    </span>
+  )
+}
+
 // ─── Tab: Arquivos / Memória ──────────────────────────────────────────────────
 
-function TabArquivos({ agentId, files, onUploaded, onDeleted }: {
-  agentId:   string
-  files:     ApiAgentFile[]
-  onUploaded:(f: ApiAgentFile) => void
-  onDeleted: (id: string) => void
+function TabArquivos({ agentId, files, onUploaded, onDeleted, onFileUpdated }: {
+  agentId:       string
+  files:         ApiAgentFile[]
+  onUploaded:   (f: ApiAgentFile) => void
+  onDeleted:    (id: string) => void
+  onFileUpdated:(id: string, patch: Partial<ApiAgentFile>) => void
 }) {
   const [uploading, setUploading] = useState(false)
   const [preview,   setPreview]   = useState<ApiAgentFile | null>(null)
   const [deleting,  setDeleting]  = useState<string | null>(null)
+  const [indexing,  setIndexing]  = useState<string | null>(null)
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -386,6 +420,25 @@ function TabArquivos({ agentId, files, onUploaded, onDeleted }: {
     if (res.ok) onUploaded(await res.json())
     setUploading(false)
     e.target.value = ""
+  }
+
+  const handleIndex = async (f: ApiAgentFile, force = false) => {
+    if (indexing || !f.extracted_text) return
+    setIndexing(f.id)
+    onFileUpdated(f.id, { embedding_status: "processing" })
+    try {
+      const res = await fetch("/api/rag/index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_type: "agent_file", source_id: f.id, force }),
+      })
+      const json = await res.json() as { ok?: boolean }
+      onFileUpdated(f.id, { embedding_status: res.ok && json.ok ? "done" : "error" })
+    } catch {
+      onFileUpdated(f.id, { embedding_status: "error" })
+    } finally {
+      setIndexing(null)
+    }
   }
 
   return (
@@ -426,11 +479,25 @@ function TabArquivos({ agentId, files, onUploaded, onDeleted }: {
                 <p className="text-xs font-medium truncate" style={{ color: "var(--text-primary)" }}>
                   {f.file_name}
                 </p>
-                <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                  {(f.file_size / 1024).toFixed(1)} KB · {f.file_type}
-                  {f.extracted_text && ` · ${f.extracted_text.length.toLocaleString()} chars`}
-                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                    {(f.file_size / 1024).toFixed(1)} KB · {f.file_type}
+                    {f.extracted_text && ` · ${f.extracted_text.length.toLocaleString()} chars`}
+                  </p>
+                  <FileEmbeddingBadge status={f.embedding_status} />
+                </div>
               </div>
+              {f.extracted_text && (
+                <button
+                  disabled={indexing === f.id || f.embedding_status === "processing"}
+                  onClick={() => handleIndex(f, f.embedding_status === "done")}
+                  className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40"
+                  style={{ color: f.embedding_status === "done" ? "#4ade80" : "var(--text-muted)" }}
+                  title={f.embedding_status === "done" ? "Reindexar" : "Indexar para RAG"}
+                >
+                  {indexing === f.id ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                </button>
+              )}
               <button
                 className="text-xs px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] transition-colors"
                 style={{ color: "var(--text-muted)" }}

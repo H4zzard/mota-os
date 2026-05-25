@@ -3,7 +3,7 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat }        from "@/lib/ai-service"
 import { buildWorkflowPrompt, companyToSlug } from "@/lib/workflow-prompts"
-import type { WorkflowStep } from "@/lib/mocks/workflows"
+import type { WorkflowStep } from "@/lib/workflow-types"
 
 function sse(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)

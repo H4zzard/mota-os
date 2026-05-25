@@ -43,18 +43,20 @@ export interface ApiAgentModelConfig {
 }
 
 export interface ApiAgentFile {
-  id:             string
-  agent_id:       string
-  company_id:     string | null
-  uploaded_by:    string | null
-  file_name:      string
-  file_type:      string
-  file_size:      number
-  storage_path:   string
-  extracted_text: string | null
-  status:         string
-  metadata:       Record<string, unknown>
-  created_at:     string
+  id:               string
+  agent_id:         string
+  company_id:       string | null
+  uploaded_by:      string | null
+  file_name:        string
+  file_type:        string
+  file_size:        number
+  storage_path:     string
+  extracted_text:   string | null
+  status:           string
+  embedding_status: string | null
+  content_hash:     string | null
+  metadata:         Record<string, unknown>
+  created_at:       string
 }
 
 export interface ApiAgentCompany {
@@ -109,18 +111,20 @@ export function mapAgent(
 
 export function mapAgentFile(row: Row): ApiAgentFile {
   return {
-    id:             row.id,
-    agent_id:       row.agent_id,
-    company_id:     row.company_id ?? null,
-    uploaded_by:    row.uploaded_by ?? null,
-    file_name:      row.file_name ?? "",
-    file_type:      row.file_type ?? "",
-    file_size:      row.file_size ?? 0,
-    storage_path:   row.storage_path ?? "",
-    extracted_text: row.extracted_text ?? null,
-    status:         row.status ?? "uploaded",
-    metadata:       row.metadata ?? {},
-    created_at:     row.created_at,
+    id:               row.id,
+    agent_id:         row.agent_id,
+    company_id:       row.company_id       ?? null,
+    uploaded_by:      row.uploaded_by      ?? null,
+    file_name:        row.file_name        ?? "",
+    file_type:        row.file_type        ?? "",
+    file_size:        row.file_size        ?? 0,
+    storage_path:     row.storage_path     ?? "",
+    extracted_text:   row.extracted_text   ?? null,
+    status:           row.status           ?? "uploaded",
+    embedding_status: row.embedding_status ?? null,
+    content_hash:     row.content_hash     ?? null,
+    metadata:         row.metadata         ?? {},
+    created_at:       row.created_at,
   }
 }
 
