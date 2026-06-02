@@ -1,27 +1,27 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Sidebar } from "./Sidebar"
-import { CompanyProvider } from "@/components/providers/CompanyProvider"
+import { useState, useEffect } from "react";
+import { Sidebar } from "./Sidebar";
+import { CompanyProvider } from "@/components/providers/CompanyProvider";
 
 function useSessionPing() {
   useEffect(() => {
-    let fp = localStorage.getItem("mota_device_fp")
+    let fp = localStorage.getItem("mota_device_fp");
     if (!fp) {
-      fp = crypto.randomUUID()
-      localStorage.setItem("mota_device_fp", fp)
+      fp = crypto.randomUUID();
+      localStorage.setItem("mota_device_fp", fp);
     }
     fetch("/api/auth/session-ping", {
-      method:  "POST",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ device_fingerprint: fp }),
-    }).catch(() => {})
-  }, [])
+      body: JSON.stringify({ device_fingerprint: fp }),
+    }).catch(() => {});
+  }, []);
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  useSessionPing()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  useSessionPing();
 
   return (
     <CompanyProvider>
@@ -31,12 +31,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <Sidebar
           collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed((v) => !v)}
+          onToggle={() => setSidebarCollapsed(v => !v)}
         />
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
           {children}
         </div>
       </div>
     </CompanyProvider>
-  )
+  );
 }
