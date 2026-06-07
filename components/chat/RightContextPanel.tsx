@@ -7,7 +7,7 @@ import {
   BookOpen, HelpCircle, FileText, Package,
   AlertTriangle, File, Link as LinkIcon,
 } from "lucide-react"
-import type { Agent } from "@/lib/mocks/agents"
+import type { AgentWithConfig } from "@/hooks/useAgents"
 
 interface SessionSource {
   id:        string
@@ -54,7 +54,7 @@ const TYPE_LABELS: Record<string, string> = {
 interface RightContextPanelProps {
   open:           boolean
   onClose:        () => void
-  agent:          Agent | null
+  agent:          AgentWithConfig | null
   sessionTitle:   string
   sessionId?:     string | null
   companyId?:     string

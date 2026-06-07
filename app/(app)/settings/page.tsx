@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   User,
@@ -64,7 +64,7 @@ const settingsTabs: {
   { id: "logs", label: "Logs", icon: ScrollText, adminOnly: true },
 ];
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const { isAdmin, loading: companyLoading } = useCompany();
   const searchParams = useSearchParams();
   const initialTab =
@@ -5008,5 +5008,13 @@ function LogsTab() {
         </>
       )}
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsPageContent />
+    </Suspense>
   );
 }

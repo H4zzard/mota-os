@@ -4,15 +4,15 @@ import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { ChevronDown, Check } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { agents as mockAgents, type Agent } from "@/lib/mocks/agents"
+import type { AgentWithConfig } from "@/hooks/useAgents"
 
 interface AgentSelectorProps {
-  selected:  Agent
-  onChange:  (agent: Agent) => void
-  agents?:   Agent[]
+  selected:  AgentWithConfig
+  onChange:  (agent: AgentWithConfig) => void
+  agents?:   AgentWithConfig[]
 }
 
-export function AgentSelector({ selected, onChange, agents = mockAgents }: AgentSelectorProps) {
+export function AgentSelector({ selected, onChange, agents = [] }: AgentSelectorProps) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -63,7 +63,7 @@ export function AgentSelector({ selected, onChange, agents = mockAgents }: Agent
               </div>
 
               <div className="p-1.5 max-h-80 overflow-y-auto">
-                {agents.map((a: Agent) => (
+                {agents.map((a) => (
                   <button
                     key={a.id}
                     onClick={() => { onChange(a); setOpen(false) }}

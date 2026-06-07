@@ -218,7 +218,7 @@ export async function POST(req: NextRequest) {
         status: "active",
       },
       {
-        onConflict: ["company_id", "user_id"],
+        onConflict: "company_id,user_id",
         ignoreDuplicates: true,
       },
     );

@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(xargs grep -l \"createContext\\\\|useContext\")",
-      "PowerShell(cd \"c:\\\\Users\\\\Cppem\\\\mota-os\"; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"dashboard|sales|snapshot|analyze|SalesMonthly|SalesMapped|SalesTicket|page.tsx\" } | Select-Object -First 30)"
+      "PowerShell(cd \"c:\\\\Users\\\\Cppem\\\\mota-os\"; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"dashboard|sales|snapshot|analyze|SalesMonthly|SalesMapped|SalesTicket|page.tsx\" } | Select-Object -First 30)",
+      "PowerShell(cd c:\\\\Users\\\\Cppem\\\\mota-os; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Select-String -Pattern \"AgentWithConfig|Agent\\\\b|chat/page|ChatInput|ChatWindow|AgentSelector|RightContextPanel\" | Select-Object -First 60)",
+      "PowerShell(cd c:\\\\Users\\\\Cppem\\\\mota-os; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"Agent|agent\" } | Select-Object -First 40)",
+      "PowerShell(cd c:\\\\Users\\\\Cppem\\\\mota-os; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"ChatInput|AgentSelector|RightContextPanel|chat/page|AgentWithConfig|mocks/agents\" } | Select-Object -First 40)",
+      "PowerShell(cd c:\\\\Users\\\\Cppem\\\\mota-os; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"error TS\" } | Select-Object -First 30)",
+      "PowerShell(cd c:\\\\Users\\\\Cppem\\\\mota-os; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"error TS\" })",
+      "Read(//mnt/c/Users/Cppem/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('cross-env' in str\\(d.get\\('dependencies',''\\)\\) + str\\(d.get\\('devDependencies',''\\)\\)\\)\")",
+      "PowerShell(\\(Get-Content \"c:\\\\Users\\\\Cppem\\\\mota-os\\\\app\\\\\\(app\\)\\\\settings\\\\page.tsx\" | Measure-Object -Line\\).Lines)"
     ]
   }
 }

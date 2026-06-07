@@ -18,7 +18,7 @@ function ensureSupabaseAdminEnv() {
 
 export function createAdminClient() {
   ensureSupabaseAdminEnv();
-  return createClient(url, serviceRole, {
+  return createClient(url!, serviceRole!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }

@@ -20,7 +20,7 @@ function ensureSupabaseClientEnv() {
 export async function createClient() {
   ensureSupabaseClientEnv();
   const cookieStore = await cookies();
-  return createServerClient(url, anon, {
+  return createServerClient(url!, anon!, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

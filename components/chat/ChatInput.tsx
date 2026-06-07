@@ -7,11 +7,9 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AgentSelector } from "./AgentSelector"
-import type { Agent } from "@/lib/mocks/agents"
+import type { AgentWithConfig } from "@/hooks/useAgents"
 import type { SlashAgentPublic } from "@/lib/slash-agents"
 import { AI_MODE_LIST, type AIMode } from "@/lib/ai/model-registry"
-
-export type { Agent }
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -32,10 +30,10 @@ interface KnowledgeSource {
 }
 
 interface ChatInputProps {
-  selectedAgent?:    Agent | null
-  onAgentChange:     (a: Agent) => void
+  selectedAgent?:    AgentWithConfig | null
+  onAgentChange:     (a: AgentWithConfig) => void
   onSend:            (text: string, aiMode: AIMode, attachmentIds: string[]) => void
-  agents?:           Agent[]
+  agents?:           AgentWithConfig[]
   disabled?:         boolean
   sessionId?:        string | null
   companyId?:        string
