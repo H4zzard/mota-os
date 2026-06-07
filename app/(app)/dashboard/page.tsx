@@ -21,11 +21,20 @@ import { WeeklyActivityChart }        from "@/components/dashboard/WeeklyActivit
 import { SalesRevenueChart }          from "@/components/dashboard/SalesRevenueChart"
 import { SalesByCompanyChart }        from "@/components/dashboard/SalesByCompanyChart"
 import { SalesPaymentStatusChart }    from "@/components/dashboard/SalesPaymentStatusChart"
+import { SalesMonthlyChart, SalesTicketChart } from "@/components/dashboard/SalesMonthlyChart"
+import { SalesMappedChart }           from "@/components/dashboard/SalesMappedChart"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Period      = "today" | "yesterday" | "7d" | "30d" | "month_to_date"
 type SalesPeriod = "today" | "yesterday" | "7d" | "30d" | "month" | "semester" | "year" | "custom"
+
+const CHILD_COMPANIES_FILTER = [
+  { slug: "cppem",   label: "CPPEM" },
+  { slug: "unicive", label: "Unicive" },
+  { slug: "colegio", label: "Colégio" },
+  { slug: "everton", label: "Everton" },
+]
 
 const SALES_PERIOD_LABELS: Record<SalesPeriod, string> = {
   today:     "Hoje",
@@ -64,14 +73,44 @@ interface SalesTxnRow {
   sale_date:          string
   source:             string
 }
+interface SalesComparison {
+  current:   number
+  previous:  number
+  delta_pct: number | null
+}
+
+interface UnmappedStats { count: number; gross: number; net: number }
+
+interface LastSync {
+  status:        string
+  processed:     number | null
+  inserted:      number | null
+  failed:        number | null
+  started_at:    string
+  finished_at:   string | null
+  error_message: string | null
+}
+
 interface SalesData {
   period:                    string
   is_consolidated:           boolean
   kpis:                      SalesKpis
-  revenue_by_day:            SalesDayPoint[]
+  active_filters:            Record<string, string | null>
+  comparison: {
+    gross_revenue:  SalesComparison
+    net_revenue:    SalesComparison
+    total_sales:    SalesComparison
+    average_ticket: SalesComparison
+    prev_period:    { start: string; end: string }
+  }
+  unmapped_stats:            UnmappedStats
+  last_sync:                 LastSync | null
+  revenue_by_day:            (SalesDayPoint & { avg_ticket: number })[]
+  revenue_by_month:          { month: string; gross: number; net: number; count: number; avg_ticket: number }[]
   revenue_by_product:        { product: string; gross: number; net: number; count: number }[]
   revenue_by_company:        SalesCompanyBar[]
   revenue_by_payment_status: SalesStatusSlice[]
+  revenue_by_source:         { source: string; count: number; gross: number; net: number }[]
   recent_transactions:       SalesTxnRow[]
 }
 
@@ -288,11 +327,14 @@ export default function DashboardPage() {
   const [latestSnapshot,  setLatestSnapshot]  = useState<Snapshot | null>(null)
 
   // Sales state
-  const [salesPeriod,  setSalesPeriod]  = useState<SalesPeriod>("30d")
-  const [salesData,    setSalesData]    = useState<SalesData | null>(null)
-  const [salesLoading, setSalesLoading] = useState(false)
-  const [salesError,   setSalesError]   = useState<string | null>(null)
-  const [showManualSale, setShowManualSale] = useState(false)
+  const [salesPeriod,        setSalesPeriod]        = useState<SalesPeriod>("30d")
+  const [salesCompanyFilter, setSalesCompanyFilter] = useState<string | null>(null)
+  const [salesData,          setSalesData]          = useState<SalesData | null>(null)
+  const [salesLoading,       setSalesLoading]       = useState(false)
+  const [salesError,         setSalesError]         = useState<string | null>(null)
+  const [showManualSale,     setShowManualSale]     = useState(false)
+  const [snapshotSaving,     setSnapshotSaving]     = useState(false)
+  const [snapshotMsg,        setSnapshotMsg]        = useState<string | null>(null)
 
   // Conta Azul state
   const [caConnected,  setCaConnected]  = useState<boolean | null>(null)
@@ -321,11 +363,15 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const fetchSales = useCallback(async (company: string, p: SalesPeriod) => {
+  const fetchSales = useCallback(async (company: string, p: SalesPeriod, companyFilter?: string | null) => {
     setSalesLoading(true)
     setSalesError(null)
     try {
-      const res = await fetch(`/api/dashboard/sales?company_id=${company}&period=${p}`)
+      const params = new URLSearchParams({ period: p })
+      // Se há filtro de empresa específica, usa ele; caso contrário usa a empresa atual
+      const effectiveCompany = companyFilter ?? company
+      params.set("company_id", effectiveCompany)
+      const res = await fetch(`/api/dashboard/sales?${params.toString()}`)
       if (!res.ok) throw new Error("Falha ao carregar dados de vendas")
       setSalesData(await res.json() as SalesData)
     } catch (e) {
@@ -340,8 +386,8 @@ export default function DashboardPage() {
   }, [currentCompany?.slug, period, fetchOverview])
 
   useEffect(() => {
-    if (currentCompany?.slug) void fetchSales(currentCompany.slug, salesPeriod)
-  }, [currentCompany?.slug, salesPeriod, fetchSales])
+    if (currentCompany?.slug) void fetchSales(currentCompany.slug, salesPeriod, salesCompanyFilter)
+  }, [currentCompany?.slug, salesPeriod, salesCompanyFilter, fetchSales])
 
   useEffect(() => {
     fetch("/api/integrations/conta-azul/status")
@@ -377,6 +423,26 @@ export default function DashboardPage() {
       if (currentCompany?.slug) void fetchSales(currentCompany.slug, salesPeriod)
     } catch { /* silent */ } finally {
       setCaSyncing(false)
+    }
+  }
+
+  async function createManualSnapshot() {
+    if (!currentCompany?.slug) return
+    setSnapshotSaving(true)
+    setSnapshotMsg(null)
+    try {
+      const res = await fetch("/api/dashboard/snapshots", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ company_id: currentCompany.slug, period: "daily", triggered_by: "manual" }),
+      })
+      const json = await res.json() as { ok?: boolean; snapshot?: { id: string }; error?: string }
+      if (!res.ok || json.error) throw new Error(json.error ?? "Erro ao criar snapshot")
+      setSnapshotMsg("Snapshot criado com sucesso.")
+    } catch (e) {
+      setSnapshotMsg(e instanceof Error ? e.message : "Erro")
+    } finally {
+      setSnapshotSaving(false)
     }
   }
 
@@ -611,6 +677,24 @@ export default function DashboardPage() {
                 )}
               </div>
               <div className="flex items-center gap-1 flex-wrap">
+                {/* Filtro por empresa — disponível apenas em visão consolidada */}
+                {salesData?.is_consolidated && (
+                  <select
+                    value={salesCompanyFilter ?? ""}
+                    onChange={e => setSalesCompanyFilter(e.target.value || null)}
+                    className="text-[10px] px-2 py-1 rounded-lg border outline-none transition-all"
+                    style={{
+                      borderColor: salesCompanyFilter ? "#16a34a" : "var(--border-color)",
+                      background:  salesCompanyFilter ? "rgba(22,163,74,0.08)" : "var(--bg-card)",
+                      color:       salesCompanyFilter ? "#16a34a" : "var(--text-secondary)",
+                    }}
+                  >
+                    <option value="">Todas as empresas</option>
+                    {CHILD_COMPANIES_FILTER.map(c => (
+                      <option key={c.slug} value={c.slug}>{c.label}</option>
+                    ))}
+                  </select>
+                )}
                 {caConnected && (
                   <button
                     onClick={handleCaSync}
@@ -682,6 +766,86 @@ export default function DashboardPage() {
                 </div>
               )}
             </motion.div>
+
+            {/* Cards info: não mapeadas + última sync + comparação */}
+            {salesData && (
+              <motion.div variants={fadeUp} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+                {/* Vendas não mapeadas */}
+                <div className="rounded-xl border p-3 flex items-start gap-3"
+                  style={{
+                    background:  salesData.unmapped_stats.count > 0 ? "rgba(245,158,11,0.06)" : "var(--bg-card)",
+                    borderColor: salesData.unmapped_stats.count > 0 ? "rgba(245,158,11,0.3)"  : "var(--border-color)",
+                  }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: "rgba(245,158,11,0.12)" }}>
+                    <AlertCircle size={14} className="text-amber-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Não mapeadas</p>
+                    <p className="text-lg font-bold tabular-nums leading-none" style={{ color: salesData.unmapped_stats.count > 0 ? "#f59e0b" : "var(--text-primary)" }}>
+                      {salesData.unmapped_stats.count}
+                    </p>
+                    <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                      {salesData.unmapped_stats.gross > 0 ? fmtBrl(salesData.unmapped_stats.gross) : "sem valor"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Última sincronização */}
+                <div className="rounded-xl border p-3 flex items-start gap-3"
+                  style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: "rgba(6,182,212,0.1)" }}>
+                    <RefreshCw size={14} className="text-cyan-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Última sync CA</p>
+                    {salesData.last_sync ? (
+                      <>
+                        <p className="text-xs font-semibold leading-tight" style={{
+                          color: salesData.last_sync.status === "success" ? "#16a34a" : salesData.last_sync.status === "error" ? "#ef4444" : "var(--text-primary)",
+                        }}>
+                          {salesData.last_sync.status === "success" ? "Concluída" : salesData.last_sync.status === "error" ? "Com erro" : salesData.last_sync.status}
+                        </p>
+                        <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                          {timeAgo(salesData.last_sync.finished_at ?? salesData.last_sync.started_at)}
+                          {salesData.last_sync.inserted != null && ` · ${salesData.last_sync.inserted} inseridas`}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>Nenhuma sync</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Comparação período anterior */}
+                <div className="rounded-xl border p-3 flex items-start gap-3"
+                  style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{ background: "rgba(59,130,246,0.1)" }}>
+                    <TrendingUp size={14} className="text-blue-500" />
+                  </div>
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>vs. período anterior</p>
+                    {[
+                      { label: "Receita", delta: salesData.comparison.gross_revenue.delta_pct },
+                      { label: "Vendas",  delta: salesData.comparison.total_sales.delta_pct },
+                      { label: "Ticket",  delta: salesData.comparison.average_ticket.delta_pct },
+                    ].map(({ label, delta }) => (
+                      <div key={label} className="flex items-center gap-1.5">
+                        <span className="text-[10px] w-10" style={{ color: "var(--text-muted)" }}>{label}</span>
+                        <span className="text-[10px] font-semibold" style={{
+                          color: delta == null ? "var(--text-muted)" : delta >= 0 ? "#16a34a" : "#ef4444",
+                        }}>
+                          {delta == null ? "—" : `${delta >= 0 ? "+" : ""}${delta}%`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
             {/* Gráficos de vendas */}
             {salesData && (
@@ -838,6 +1002,55 @@ export default function DashboardPage() {
                 </DashboardCard>
               </motion.div>
             )}
+            {/* Evolução mensal + ticket médio */}
+            {salesData && (
+              <motion.div variants={fadeUp} className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <DashboardCard
+                  title="Evolução mensal"
+                  subtitle="Receita e ticket médio por mês"
+                  icon={BarChart2}
+                  iconColor="#8b5cf6"
+                >
+                  <SalesMonthlyChart data={salesData.revenue_by_month} />
+                </DashboardCard>
+
+                <DashboardCard
+                  title="Ticket médio por dia"
+                  subtitle="Valor médio por venda aprovada"
+                  icon={TrendingUp}
+                  iconColor="#8b5cf6"
+                >
+                  <SalesTicketChart data={salesData.revenue_by_day} />
+                </DashboardCard>
+              </motion.div>
+            )}
+
+            {/* Mapeadas vs não mapeadas */}
+            {salesData && (
+              <motion.div variants={fadeUp}>
+                <DashboardCard
+                  title="Mapeadas vs não mapeadas"
+                  subtitle="Vendas com empresa identificada vs sem identificação"
+                  icon={AlertCircle}
+                  iconColor="#f59e0b"
+                  action={
+                    salesData.unmapped_stats.count > 0 ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-500/10 text-amber-500">
+                        {salesData.unmapped_stats.count} pendente{salesData.unmapped_stats.count !== 1 ? "s" : ""}
+                      </span>
+                    ) : undefined
+                  }
+                >
+                  <SalesMappedChart data={{
+                    mapped_count:   salesData.kpis.total_sales,
+                    unmapped_count: salesData.unmapped_stats.count,
+                    mapped_gross:   salesData.kpis.gross_revenue,
+                    unmapped_gross: salesData.unmapped_stats.gross,
+                  }} />
+                </DashboardCard>
+              </motion.div>
+            )}
+
           </motion.div>
 
           {/* Operations row — workflows + projects */}
@@ -1066,27 +1279,40 @@ export default function DashboardPage() {
             <motion.div variants={fadeUp}>
               <DashboardCard
                 title="Análise executiva IA"
-                subtitle="Gerada pelo Jarvis"
+                subtitle="Gerada pelo Jarvis — inclui dados financeiros"
                 icon={Sparkles}
                 iconColor="#8b5cf6"
                 action={
-                  <button
-                    onClick={() => void generateAnalysis()}
-                    disabled={analysisLoading}
-                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50"
-                    style={{
-                      borderColor: "rgba(139,92,246,0.3)",
-                      background:  "rgba(139,92,246,0.08)",
-                      color:       "#a78bfa",
-                    }}
-                  >
-                    <Sparkles size={11} className={analysisLoading ? "animate-pulse" : ""} />
-                    {analysisLoading ? "Gerando..." : "Gerar análise"}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => void createManualSnapshot()}
+                      disabled={snapshotSaving}
+                      className="text-[10px] px-2 py-1 rounded-lg border transition-all disabled:opacity-50"
+                      style={{ borderColor: "var(--border-color)", color: "var(--text-muted)" }}
+                      title="Salvar snapshot com KPIs atuais sem gerar análise IA"
+                    >
+                      {snapshotSaving ? "..." : "Snapshot"}
+                    </button>
+                    <button
+                      onClick={() => void generateAnalysis()}
+                      disabled={analysisLoading}
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50"
+                      style={{
+                        borderColor: "rgba(139,92,246,0.3)",
+                        background:  "rgba(139,92,246,0.08)",
+                        color:       "#a78bfa",
+                      }}
+                    >
+                      <Sparkles size={11} className={analysisLoading ? "animate-pulse" : ""} />
+                      {analysisLoading ? "Gerando..." : "Gerar análise"}
+                    </button>
+                  </div>
                 }
               >
-                {analysisError && (
-                  <p className="text-xs text-red-400 mb-3">{analysisError}</p>
+                {(analysisError || snapshotMsg) && (
+                  <p className={`text-xs mb-3 ${analysisError ? "text-red-400" : "text-emerald-500"}`}>
+                    {analysisError ?? snapshotMsg}
+                  </p>
                 )}
 
                 <AnimatePresence mode="wait">

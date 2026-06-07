@@ -1,54 +1,32 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase-browser"
 
-export default function ResetPasswordPage() {
-  const router = useRouter()
-
-  const [sessionReady, setSessionReady] = useState(false)
-  const [initError,    setInitError]    = useState<string | null>(null)
-  const [password,     setPassword]     = useState("")
-  const [confirm,      setConfirm]      = useState("")
-  const [loading,      setLoading]      = useState(false)
-  const [error,        setError]        = useState<string | null>(null)
-  const [success,      setSuccess]      = useState(false)
-
-  // Troca o code da URL por uma sessão de recovery
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code   = params.get("code")
-
-    if (!code) {
-      setInitError("Link inválido ou expirado. Solicite um novo e-mail de recuperação.")
-      return
-    }
-
-    const supabase = createClient()
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
-        setInitError(
-          error.message.includes("code verifier")
-            ? "Link já utilizado ou aberto em navegador diferente. Solicite um novo e-mail."
-            : error.message
-        )
-      } else {
-        setSessionReady(true)
-        // Remove o code da URL para evitar replay acidental
-        window.history.replaceState({}, "", window.location.pathname)
-      }
-    })
-  }, [])
+export default function ChangePasswordPage() {
+  const router  = useRouter()
+  const [password, setPassword]   = useState("")
+  const [confirm,  setConfirm]    = useState("")
+  const [loading,  setLoading]    = useState(false)
+  const [error,    setError]      = useState<string | null>(null)
+  const [success,  setSuccess]    = useState(false)
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     if (loading || success) return
-
     setError(null)
 
     if (password.length < 8) {
       setError("A senha deve ter pelo menos 8 caracteres.")
+      return
+    }
+    if (!/[a-zA-Z]/.test(password)) {
+      setError("A senha deve conter pelo menos uma letra.")
+      return
+    }
+    if (!/[0-9]/.test(password)) {
+      setError("A senha deve conter pelo menos um número.")
       return
     }
     if (password !== confirm) {
@@ -57,29 +35,28 @@ export default function ResetPasswordPage() {
     }
 
     setLoading(true)
-    const supabase = createClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
-    const { error } = await supabase.auth.updateUser({ password })
 
-    if (error) {
-      setError(error.message)
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ new_password: password, confirm_password: confirm }),
+    })
+
+    const json = await res.json() as { ok?: boolean; error?: string }
+
+    if (!res.ok || !json.ok) {
+      setError(json.error ?? "Erro ao alterar senha.")
       setLoading(false)
       return
     }
 
-    // Registra primeiro acesso se for convite (must_change_password ou first_access_at nulo)
-    const isInvite = currentUser?.app_metadata?.must_change_password === true
-      || !currentUser?.user_metadata?.first_access_at
-    if (isInvite) {
-      await fetch("/api/auth/first-access", {
-        method: "POST",
-        credentials: "same-origin",
-      }).catch(() => {/* não bloqueia */})
-    }
+    // Atualiza a sessão para que o JWT reflita must_change_password = false
+    const supabase = createClient()
+    await supabase.auth.refreshSession()
 
     setSuccess(true)
-    await supabase.auth.signOut()
-    setTimeout(() => router.push("/login"), 1800)
+    setTimeout(() => router.push("/dashboard"), 1500)
   }
 
   const inputCls   = "w-full rounded-lg px-3 py-2 text-sm outline-none transition-colors"
@@ -109,35 +86,14 @@ export default function ResetPasswordPage() {
           M
         </div>
         <h1 className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-          Nova senha
+          Defina sua senha
         </h1>
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Defina uma nova senha para sua conta
+        <p className="text-sm text-center" style={{ color: "var(--text-secondary)" }}>
+          Por segurança, crie uma senha pessoal para acessar o Jarvis.
         </p>
       </div>
 
-      {/* Erro de inicialização (link inválido / expirado) */}
-      {initError && (
-        <div
-          className="text-sm rounded-lg px-4 py-3 text-center space-y-2"
-          style={{ background: "rgba(239,68,68,0.1)", color: "#f87171" }}
-        >
-          <p>{initError}</p>
-          <a href="/login" className="underline text-xs" style={{ color: "#f87171" }}>
-            Voltar para o login
-          </a>
-        </div>
-      )}
-
-      {/* Aguardando troca do code */}
-      {!initError && !sessionReady && (
-        <p className="text-sm text-center" style={{ color: "var(--text-secondary)" }}>
-          Verificando link…
-        </p>
-      )}
-
-      {/* Formulário de nova senha */}
-      {sessionReady && !success && (
+      {!success && (
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
@@ -151,6 +107,7 @@ export default function ResetPasswordPage() {
               required
               minLength={8}
               autoComplete="new-password"
+              disabled={loading}
               className={inputCls}
               style={inputStyle}
               {...focusHandlers}
@@ -168,11 +125,16 @@ export default function ResetPasswordPage() {
               placeholder="Repita a nova senha"
               required
               autoComplete="new-password"
+              disabled={loading}
               className={inputCls}
               style={inputStyle}
               {...focusHandlers}
             />
           </div>
+
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Use letras e números. Mínimo 8 caracteres.
+          </p>
 
           {error && (
             <p
@@ -189,18 +151,17 @@ export default function ResetPasswordPage() {
             className="w-full rounded-lg px-4 py-2.5 text-sm font-medium transition-opacity disabled:opacity-60"
             style={{ background: "var(--color-mota-purple)", color: "#fff" }}
           >
-            {loading ? "Salvando…" : "Salvar nova senha"}
+            {loading ? "Salvando…" : "Definir senha e continuar"}
           </button>
         </form>
       )}
 
-      {/* Sucesso */}
       {success && (
         <div
           className="text-sm rounded-lg px-4 py-3 text-center"
           style={{ background: "rgba(22,163,74,0.1)", color: "#4ade80" }}
         >
-          Senha alterada com sucesso! Redirecionando…
+          Senha definida com sucesso! Redirecionando…
         </div>
       )}
     </div>

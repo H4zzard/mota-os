@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
+import { denyAccess } from '@/lib/api-guard'
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +19,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (!await isGlobalAdmin(user.id)) {
+    return denyAccess({ req: _req, userId: user.id, reason: "not_admin" })
   }
 
   const adminClient = createAdminClient()
@@ -49,7 +54,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   if (!await isGlobalAdmin(user.id)) {
-    return Response.json({ error: 'Forbidden' }, { status: 403 })
+    return denyAccess({ req, userId: user.id, reason: "not_admin" })
   }
 
   const body = (await req.json()) as {

@@ -3,6 +3,7 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin }     from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
+import { denyAccess }        from "@/lib/api-guard"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +20,7 @@ export async function GET(
 
   const isAdmin = await isGlobalAdmin(user.id)
   if (!isAdmin && user.id !== id) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 })
+    return denyAccess({ req: _req, userId: user.id, reason: "not_admin" })
   }
 
   const admin = createAdminClient()
@@ -72,7 +73,7 @@ export async function PATCH(
 
   // Não-admin só pode editar o próprio perfil e apenas campos básicos
   if (!isAdmin && user.id !== id) {
-    return NextResponse.json({ error: "Sem permissão" }, { status: 403 })
+    return denyAccess({ req, userId: user.id, reason: "not_admin" })
   }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
@@ -82,12 +83,35 @@ export async function PATCH(
   if (body.avatar_url         !== undefined) patch.avatar_url         = body.avatar_url  ?? null
   if (body.default_company_id !== undefined) patch.default_company_id = body.default_company_id ?? null
 
+  const admin = createAdminClient()
+
   // Apenas admin pode alterar role global
   if (isAdmin && body.role !== undefined) {
+    // Bloquear rebaixamento do último admin
+    if (body.role !== "admin") {
+      const { data: target } = await admin
+        .from("profiles")
+        .select("role")
+        .eq("id", id)
+        .single()
+
+      if (target?.role === "admin") {
+        const { count } = await admin
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("role", "admin")
+
+        if ((count ?? 0) <= 1) {
+          return NextResponse.json(
+            { error: "Não é possível rebaixar o único administrador do sistema. Promova outro usuário a admin primeiro." },
+            { status: 409 },
+          )
+        }
+      }
+    }
     patch.role = body.role
   }
 
-  const admin = createAdminClient()
   const { data, error } = await admin
     .from("profiles")
     .update(patch)

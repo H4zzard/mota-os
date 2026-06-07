@@ -1245,17 +1245,17 @@ function UsersTab() {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string>("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
-    password: "",
     company_id: "",
   });
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState("");
+  const [resetingUserId, setResetingUserId] = useState<string | null>(null);
+  const [resetMsg, setResetMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -1312,10 +1312,6 @@ function UsersTab() {
       setError("Email é obrigatório");
       return;
     }
-    if (!formData.password.trim()) {
-      setError("Senha é obrigatória");
-      return;
-    }
     if (!formData.company_id) {
       setError("Empresa é obrigatória");
       return;
@@ -1327,7 +1323,6 @@ function UsersTab() {
       const data = new FormData();
       data.append("name", formData.name);
       data.append("email", formData.email);
-      data.append("password", formData.password);
       data.append("company_id", formData.company_id);
       if (avatarFile) {
         data.append("avatar", avatarFile);
@@ -1351,8 +1346,8 @@ function UsersTab() {
         throw new Error(json?.error ?? fallbackText ?? "Erro ao criar usuário");
       }
 
-      setSuccess("Usuário criado com sucesso!");
-      setFormData({ name: "", email: "", password: "", company_id: "" });
+      setSuccess("Convite enviado! O usuário receberá um e-mail para definir sua senha.");
+      setFormData({ name: "", email: "", company_id: "" });
       setAvatarFile(null);
       setAvatarPreview("");
 
@@ -1382,8 +1377,30 @@ function UsersTab() {
     }
   }
 
+  async function handleResetPassword(userId: string) {
+    setResetingUserId(userId);
+    setResetMsg(null);
+    try {
+      const res = await fetch(`/api/users/${userId}/reset-password`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const json = await res.json() as { ok?: boolean; message?: string; error?: string };
+      setResetMsg({
+        id: userId,
+        text: json.message ?? json.error ?? (res.ok ? "E-mail enviado!" : "Erro ao enviar"),
+        ok: res.ok,
+      });
+    } catch {
+      setResetMsg({ id: userId, text: "Erro de conexão", ok: false });
+    } finally {
+      setResetingUserId(null);
+      setTimeout(() => setResetMsg(null), 5000);
+    }
+  }
+
   function resetForm() {
-    setFormData({ name: "", email: "", password: "", company_id: "" });
+    setFormData({ name: "", email: "", company_id: "" });
     setAvatarFile(null);
     setAvatarPreview("");
     setError("");
@@ -1450,10 +1467,12 @@ function UsersTab() {
                   minute: "2-digit",
                 })
               : "Nunca";
+            const isReseting = resetingUserId === u.id;
+            const thisMsg = resetMsg?.id === u.id ? resetMsg : null;
             return (
               <div
                 key={u.id}
-                className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-3 border-b last:border-b-0"
+                className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3 border-b last:border-b-0"
                 style={{
                   borderColor: "var(--border-color)",
                   background: "var(--bg-card)",
@@ -1480,6 +1499,14 @@ function UsersTab() {
                       Membro desde{" "}
                       {new Date(u.created_at).toLocaleDateString("pt-BR")}
                     </p>
+                    {thisMsg && (
+                      <p
+                        className="text-[10px] mt-0.5"
+                        style={{ color: thisMsg.ok ? "#4ade80" : "#f87171" }}
+                      >
+                        {thisMsg.text}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <span
@@ -1488,6 +1515,18 @@ function UsersTab() {
                 >
                   {lastSeen}
                 </span>
+                <button
+                  onClick={() => void handleResetPassword(u.id)}
+                  disabled={isReseting}
+                  title="Enviar e-mail de reset de senha"
+                  className="p-1.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  {isReseting ? (
+                    <Loader2 size={13} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+                  ) : (
+                    <KeyRound size={13} style={{ color: "var(--text-muted)" }} />
+                  )}
+                </button>
               </div>
             );
           })}
@@ -1643,42 +1682,6 @@ function UsersTab() {
                 />
               </Field>
 
-              {/* Senha */}
-              <Field label="Senha">
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Mínimo 8 caracteres"
-                    value={formData.password}
-                    onChange={e =>
-                      setFormData({ ...formData, password: e.target.value })
-                    }
-                    disabled={creating}
-                    className="w-full rounded-xl px-3 py-2.5 text-xs border outline-none placeholder:text-[var(--text-muted)] transition-colors focus:border-mota-500 pr-9"
-                    style={{
-                      background: "var(--bg-input)",
-                      borderColor: "var(--border-color)",
-                      color: "var(--text-primary)",
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    disabled={creating}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 disabled:opacity-50"
-                  >
-                    {showPassword ? (
-                      <EyeOff
-                        size={14}
-                        style={{ color: "var(--text-muted)" }}
-                      />
-                    ) : (
-                      <Eye size={14} style={{ color: "var(--text-muted)" }} />
-                    )}
-                  </button>
-                </div>
-              </Field>
-
               {/* Empresa */}
               <Field label="Empresa">
                 <select
@@ -1702,6 +1705,22 @@ function UsersTab() {
                   ))}
                 </select>
               </Field>
+
+              {/* Orientação sobre convite */}
+              <div
+                className="flex items-start gap-2 p-3 rounded-lg text-xs"
+                style={{
+                  background: "rgba(99,102,241,0.08)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid rgba(99,102,241,0.2)",
+                }}
+              >
+                <KeyRound size={13} className="shrink-0 mt-0.5" style={{ color: "#818cf8" }} />
+                <span>
+                  O usuário receberá um <strong>e-mail de convite</strong> para definir a própria senha.
+                  Nenhuma senha temporária será compartilhada.
+                </span>
+              </div>
 
               {/* Botões */}
               <div
@@ -1732,12 +1751,12 @@ function UsersTab() {
                   {creating ? (
                     <>
                       <Loader2 size={14} className="animate-spin" />
-                      Criando...
+                      Enviando convite…
                     </>
                   ) : (
                     <>
                       <Plus size={14} />
-                      Criar
+                      Enviar convite
                     </>
                   )}
                 </button>

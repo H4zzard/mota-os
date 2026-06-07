@@ -3,6 +3,7 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
 import { isGlobalAdmin }     from "@/lib/company-scope"
+import { denyAccess }        from "@/lib/api-guard"
 
 export const dynamic = "force-dynamic"
 
@@ -42,10 +43,13 @@ function maskConfig(config: Record<string, unknown>): Record<string, string> {
 
 // ─── GET — lista todas as conexões mesclada com KNOWN_PROVIDERS ───────────────
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+
+  const adminUser = await isGlobalAdmin(user.id)
+  if (!adminUser) return denyAccess({ req, userId: user.id, reason: "not_admin" })
 
   const admin = createAdminClient()
 
@@ -82,7 +86,7 @@ export async function PATCH(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
   const adminUser = await isGlobalAdmin(user.id)
-  if (!adminUser) return NextResponse.json({ error: "Acesso restrito a administradores." }, { status: 403 })
+  if (!adminUser) return denyAccess({ req, userId: user.id, reason: "not_admin" })
 
   const body = await req.json() as {
     provider: string
@@ -150,7 +154,7 @@ export async function DELETE(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
   const adminUser = await isGlobalAdmin(user.id)
-  if (!adminUser) return NextResponse.json({ error: "Acesso restrito a administradores." }, { status: 403 })
+  if (!adminUser) return denyAccess({ req, userId: user.id, reason: "not_admin" })
 
   const body = await req.json() as { provider?: string; id?: string }
 

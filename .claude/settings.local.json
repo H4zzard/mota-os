@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep -l \"createContext\\\\|useContext\")"
+      "Bash(xargs grep -l \"createContext\\\\|useContext\")",
+      "PowerShell(cd \"c:\\\\Users\\\\Cppem\\\\mota-os\"; $env:NODE_OPTIONS=\"--max-old-space-size=4096\"; npx tsc --noEmit --skipLibCheck 2>&1 | Where-Object { $_ -match \"dashboard|sales|snapshot|analyze|SalesMonthly|SalesMapped|SalesTicket|page.tsx\" } | Select-Object -First 30)"
     ]
   }
 }

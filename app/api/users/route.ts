@@ -109,7 +109,6 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const name = formData.get("name") as string | null;
     const email = formData.get("email") as string | null;
-    const password = formData.get("password") as string | null;
     const companyId = formData.get("company_id") as string | null;
     const avatarFile = formData.get("avatar") as File | null;
 
@@ -126,12 +125,6 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (!password?.trim() || password.length < 6) {
-      return NextResponse.json(
-        { error: "Senha deve ter pelo menos 6 caracteres" },
-        { status: 400 },
-      );
-    }
     if (!companyId?.trim()) {
       return NextResponse.json(
         { error: "Empresa é obrigatória" },
@@ -141,17 +134,24 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    // Criar usuário no Supabase Auth usando service role key
-    const { data: authData, error: authError } =
-      await admin.auth.admin.createUser({
-        email: email.toLowerCase().trim(),
-        password: password,
-        email_confirm: true,
-      });
+    const origin = req.headers.get("origin")
+      ?? process.env.NEXT_PUBLIC_APP_URL
+      ?? ""
 
-    if (authError || !authData.user) {
+    // Convida o usuário por e-mail — sem senha temporária, sem envio manual.
+    // O Supabase envia o e-mail de convite via SMTP configurado.
+    const { data: authData, error: authError } =
+      await admin.auth.admin.inviteUserByEmail(
+        email.toLowerCase().trim(),
+        {
+          data: { name: name.trim() },
+          redirectTo: `${origin}/reset-password`,
+        },
+      )
+
+    if (authError || !authData?.user) {
       return NextResponse.json(
-        { error: authError?.message || "Erro ao criar usuário" },
+        { error: authError?.message || "Erro ao convidar usuário" },
         { status: 400 },
       );
     }
@@ -183,7 +183,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Criar perfil na tabela profiles
+    // Cria/atualiza perfil. Sem ignoreDuplicates para sobrescrever dados
+    // gerados por trigger com nome e empresa corretos.
     const { error: profileError } = await admin.from("profiles").upsert(
       {
         id: newUserId,
@@ -192,13 +193,11 @@ export async function POST(req: NextRequest) {
         avatar_url: avatarUrl,
         role: "viewer",
         default_company_id: companyId,
+        must_change_password: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-      {
-        onConflict: "id",
-        ignoreDuplicates: true,
-      },
+      { onConflict: "id" },
     );
 
     if (profileError) {
@@ -234,15 +233,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Log de atividade
-    await logActivity({
+    void logActivity({
       userId: user.id,
       eventType: "settings",
       action: "create",
-      detail: `Novo usuário criado: ${email}`,
+      detail: `Convite enviado para: ${email}`,
       metadata: {
         entity: "user",
         entityId: newUserId,
+        invite_flow: true,
       },
     });
 
@@ -254,6 +253,7 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString(),
         last_sign_in_at: null,
       },
+      message: `Convite enviado para ${email}. O usuário receberá um e-mail para definir sua senha.`,
     });
   } catch (err) {
     console.error("Erro ao criar usuário:", err);
