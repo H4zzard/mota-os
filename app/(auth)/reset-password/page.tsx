@@ -67,9 +67,9 @@ export default function ResetPasswordPage() {
       return
     }
 
-    // Registra primeiro acesso se for convite (must_change_password ou first_access_at nulo)
+    // Registra primeiro acesso se for convite (apenas quando app_metadata tiver must_change_password=true).
+    // first_access_at fica em profiles (não em user_metadata), por isso usamos só app_metadata.
     const isInvite = currentUser?.app_metadata?.must_change_password === true
-      || !currentUser?.user_metadata?.first_access_at
     if (isInvite) {
       await fetch("/api/auth/first-access", {
         method: "POST",

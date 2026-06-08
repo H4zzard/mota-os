@@ -56,41 +56,49 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // Rotas de auth públicas — usuário logado é redirecionado para o dashboard
-  const isPublicAuthRoute =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/reset-password") ||
-    pathname.startsWith("/auth/")
+  // Rotas de API têm própria verificação de auth — middleware não interfere
+  const isApiRoute = pathname.startsWith("/api/")
+
+  // Rotas onde usuário logado deve ser redirecionado ao dashboard
+  // NOTA: /reset-password NÃO está aqui — usuário logado PRECISA acessá-la
+  // para fluxos de recovery e convite (o link do e-mail aponta diretamente pra ela)
+  const isLoginRoute = pathname.startsWith("/login") || pathname.startsWith("/auth/")
+
+  // /reset-password é acessível para ambos: logado (recovery) e não-logado (link de e-mail)
+  const isResetPasswordRoute = pathname.startsWith("/reset-password")
 
   // Rota de troca obrigatória — acessível apenas para usuários logados
   const isChangePasswordRoute = pathname.startsWith("/change-password")
 
-  // Rotas de API têm própria verificação de auth — middleware não interfere
-  const isApiRoute = pathname.startsWith("/api/")
+  // Rotas acessíveis sem autenticação
+  const isPublicRoute = isLoginRoute || isResetPasswordRoute
 
-  if (!user && !isPublicAuthRoute && !isChangePasswordRoute && !isApiRoute) {
+  // Usuário não logado tentando acessar rota protegida → login
+  if (!user && !isPublicRoute && !isChangePasswordRoute && !isApiRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
     return NextResponse.redirect(url)
   }
 
-  // Usuário não logado tenta acessar /change-password → redireciona para login
+  // Usuário não logado tentando /change-password → login
   if (!user && isChangePasswordRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
     return NextResponse.redirect(url)
   }
 
-  if (user && isPublicAuthRoute) {
+  // Usuário logado em /login ou /auth/* → dashboard
+  // /reset-password é excluído intencionalmente: recovery flow precisa desta página
+  if (user && isLoginRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/dashboard"
     return NextResponse.redirect(url)
   }
 
-  // Usuário com troca obrigatória pendente → redirecionar para /change-password
+  // Usuário com troca obrigatória pendente → /change-password
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mustChange = (user as any)?.app_metadata?.must_change_password === true
-  if (user && mustChange && !isChangePasswordRoute && !isApiRoute) {
+  if (user && mustChange && !isChangePasswordRoute && !isResetPasswordRoute && !isApiRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/change-password"
     return NextResponse.redirect(url)

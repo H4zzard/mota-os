@@ -37,7 +37,9 @@ export default function LoginPage() {
       setError(
         error.message === "Invalid login credentials"
           ? "E-mail ou senha incorretos."
-          : error.message
+          : error.message.includes("rate limit") || error.message.includes("too many")
+            ? "Muitas tentativas. Aguarde alguns minutos antes de tentar novamente."
+            : error.message
       )
       setLoading(false)
       return
@@ -47,7 +49,9 @@ export default function LoginPage() {
     router.refresh()
   }
 
-  // ─── Recuperação de senha ────────────────────────────────────────────────────
+  // ─── Recuperação de senha (server-side proxy) ────────────────────────────────
+  // Usa /api/auth/send-recovery para evitar rate limit do client SDK da Supabase.
+  // Controlado por AUTH_RATE_LIMIT_ENABLED=false em desenvolvimento.
 
   async function handleForgotPassword(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -55,20 +59,25 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+    const res = await fetch("/api/auth/send-recovery", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email }),
     })
 
     setLoading(false)
-    if (error) {
-      setError(error.message)
+
+    if (!res.ok) {
+      const json = await res.json() as { error?: string }
+      setError(json.error ?? "Erro ao enviar e-mail de recuperação.")
       return
     }
+
     setSent(true)
   }
 
-  // ─── Magic link ──────────────────────────────────────────────────────────────
+  // ─── Magic link (server-side proxy) ─────────────────────────────────────────
+  // Usa /api/auth/send-magic-link para evitar rate limit do client SDK da Supabase.
 
   async function handleMagicLink(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -76,17 +85,20 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    const res = await fetch("/api/auth/send-magic-link", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email }),
     })
 
     setLoading(false)
-    if (error) {
-      setError(error.message)
+
+    if (!res.ok) {
+      const json = await res.json() as { error?: string }
+      setError(json.error ?? "Erro ao enviar link mágico.")
       return
     }
+
     setSent(true)
   }
 

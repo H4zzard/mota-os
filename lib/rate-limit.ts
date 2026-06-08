@@ -20,13 +20,24 @@ export interface RateLimitResult {
 // ─── Limites de requisições por rota ─────────────────────────────────────────
 
 export const RATE_LIMITS = {
-  chat:       { limit: 30,  windowMs: 60_000 },
-  slashAgent: { limit: 30,  windowMs: 60_000 },
-  browser:    { limit: 5,   windowMs: 60_000 },
-  finance:    { limit: 10,  windowMs: 60_000 },
-  automation: { limit: 20,  windowMs: 60_000 },
-  default:    { limit: 60,  windowMs: 60_000 },
+  chat:            { limit: 30, windowMs:      60_000 },
+  slashAgent:      { limit: 30, windowMs:      60_000 },
+  browser:         { limit: 5,  windowMs:      60_000 },
+  finance:         { limit: 10, windowMs:      60_000 },
+  automation:      { limit: 20, windowMs:      60_000 },
+  default:         { limit: 60, windowMs:      60_000 },
+  // Auth — janela de 15 min para limitar tentativas de brute-force
+  auth_login:      { limit: 10, windowMs: 15 * 60_000 },
+  auth_magic_link: { limit: 5,  windowMs: 15 * 60_000 },
+  auth_recovery:   { limit: 5,  windowMs: 15 * 60_000 },
 } as const
+
+// ─── Auth rate limit habilitado? ──────────────────────────────────────────────
+// Defina AUTH_RATE_LIMIT_ENABLED=false em .env.local para desabilitar em dev/testes.
+// Em produção, mantenha omitido ou true.
+export function isAuthRateLimitEnabled(): boolean {
+  return process.env.AUTH_RATE_LIMIT_ENABLED !== "false"
+}
 
 // ─── Limites de tamanho de body (bytes) ──────────────────────────────────────
 
