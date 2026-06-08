@@ -27,79 +27,94 @@ export default function LoginPage() {
   async function handleLogin(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     if (loading) return
-    setLoading(true)
     setError(null)
-
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      setError(
-        error.message === "Invalid login credentials"
-          ? "E-mail ou senha incorretos."
-          : error.message.includes("rate limit") || error.message.includes("too many")
-            ? "Muitas tentativas. Aguarde alguns minutos antes de tentar novamente."
-            : error.message
-      )
+    setLoading(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        setError(
+          error.message === "Invalid login credentials"
+            ? "E-mail ou senha incorretos."
+            : error.message.includes("rate limit") || error.message.includes("too many")
+              ? "Muitas tentativas. Aguarde alguns minutos."
+              : error.message
+        )
+        return
+      }
+      router.push("/dashboard")
+      router.refresh()
+    } catch {
+      setError("Erro de conexão. Verifique sua internet e tente novamente.")
+    } finally {
+      // só reseta loading em caso de erro — em sucesso o componente desmonta
+      // (checar se ainda está montado não é necessário pois React ignora setState após desmonte)
       setLoading(false)
-      return
     }
-
-    router.push("/dashboard")
-    router.refresh()
   }
 
   // ─── Recuperação de senha (server-side proxy) ────────────────────────────────
-  // Usa /api/auth/send-recovery para evitar rate limit do client SDK da Supabase.
-  // Controlado por AUTH_RATE_LIMIT_ENABLED=false em desenvolvimento.
+  // Usa /api/auth/send-recovery → POST /auth/v1/recover (anon key, envia email garantido).
+  // Controlado por AUTH_RATE_LIMIT_ENABLED=false em .env.local para desenvolvimento.
 
   async function handleForgotPassword(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     if (loading) return
-    setLoading(true)
     setError(null)
-
-    const res = await fetch("/api/auth/send-recovery", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ email }),
-    })
-
-    setLoading(false)
-
-    if (!res.ok) {
-      const json = await res.json() as { error?: string }
-      setError(json.error ?? "Erro ao enviar e-mail de recuperação.")
-      return
+    setLoading(true)
+    try {
+      const res = await fetch("/api/auth/send-recovery", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email }),
+      })
+      if (res.ok) {
+        setSent(true)
+        return
+      }
+      // Tenta extrair mensagem de erro do JSON
+      let errMsg = "Erro ao enviar e-mail de recuperação. Tente novamente."
+      try {
+        const json = await res.json() as { error?: string }
+        if (json.error) errMsg = json.error
+      } catch { /* resposta não é JSON — usa mensagem padrão */ }
+      setError(errMsg)
+    } catch {
+      setError("Erro de conexão. Verifique sua internet e tente novamente.")
+    } finally {
+      setLoading(false)
     }
-
-    setSent(true)
   }
 
   // ─── Magic link (server-side proxy) ─────────────────────────────────────────
-  // Usa /api/auth/send-magic-link para evitar rate limit do client SDK da Supabase.
+  // Usa /api/auth/send-magic-link → POST /auth/v1/otp (anon key, envia email garantido).
 
   async function handleMagicLink(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     if (loading) return
-    setLoading(true)
     setError(null)
-
-    const res = await fetch("/api/auth/send-magic-link", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ email }),
-    })
-
-    setLoading(false)
-
-    if (!res.ok) {
-      const json = await res.json() as { error?: string }
-      setError(json.error ?? "Erro ao enviar link mágico.")
-      return
+    setLoading(true)
+    try {
+      const res = await fetch("/api/auth/send-magic-link", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email }),
+      })
+      if (res.ok) {
+        setSent(true)
+        return
+      }
+      let errMsg = "Erro ao enviar link mágico. Tente novamente."
+      try {
+        const json = await res.json() as { error?: string }
+        if (json.error) errMsg = json.error
+      } catch { /* resposta não é JSON */ }
+      setError(errMsg)
+    } catch {
+      setError("Erro de conexão. Verifique sua internet e tente novamente.")
+    } finally {
+      setLoading(false)
     }
-
-    setSent(true)
   }
 
   // ─── Shared styles ───────────────────────────────────────────────────────────
