@@ -1,46 +1,60 @@
-import { createClient } from "@/lib/supabase-server"
-import { NextResponse }  from "next/server"
+import { createClient } from "@/lib/supabase-server";
+import { NextResponse } from "next/server";
 
-/**
- * Callback PKCE do Supabase Auth (Magic Link, Recovery, Invite).
- *
- * O code_verifier foi armazenado em cookie pelo /api/auth/send-magic-link
- * ou /api/auth/send-recovery (via createServerClient). O browser enviou esse
- * cookie de volta nesta request. createServerClient lê o verifier dos cookies
- * e o inclui automaticamente na chamada exchangeCodeForSession.
- *
- * Para todos os tipos (magic link, recovery, invite):
- *   1. Troca o code por uma sessão aqui (server-side, acesso ao cookie com verifier)
- *   2. Recovery → redireciona para /reset-password (sem code, já tem sessão)
- *   3. Outros → redireciona para /dashboard (ou ?next)
- */
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get("code")
-  const type = searchParams.get("type")   // 'recovery' | 'magiclink' | 'invite' | null
-  const next = searchParams.get("next") ?? "/dashboard"
+  console.log("====================================");
+  console.log("AUTH CALLBACK EXECUTOU");
+  console.log("URL:", request.url);
+  console.log("====================================");
 
-  console.log(`[auth/callback] GET type=${type} code=${code ? "present" : "absent"}`)
+  try {
+    const url = new URL(request.url);
+    const origin = url.origin;
 
-  if (code) {
-    const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const code = url.searchParams.get("code");
+    const type = url.searchParams.get("type");
+    const next = url.searchParams.get("next") ?? "/dashboard";
 
-    if (error) {
-      console.error(`[auth/callback] exchangeCodeForSession error: ${error.message}`)
-      const url = new URL("/login", origin)
-      url.searchParams.set("error", "link_inválido")
-      return NextResponse.redirect(url.toString())
+    console.log("code:", code);
+    console.log("type:", type);
+    console.log("next:", next);
+
+    if (code) {
+      console.log("Executando exchangeCodeForSession");
+
+      const supabase = await createClient();
+
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (error) {
+        console.error("exchangeCodeForSession error:", error);
+
+        const loginUrl = new URL("/login", origin);
+        loginUrl.searchParams.set("error", error.message);
+
+        return NextResponse.redirect(loginUrl);
+      }
+
+      console.log("exchangeCodeForSession OK");
+
+      if (type === "recovery") {
+        return NextResponse.redirect(new URL("/reset-password", origin));
+      }
+
+      return NextResponse.redirect(new URL(next, origin));
     }
 
-    console.log(`[auth/callback] session established type=${type}`)
-  }
+    console.warn("Nenhum code encontrado na URL");
 
-  // Recovery: sessão de recovery estabelecida acima → vai para /reset-password.
-  // A página usa a sessão ativa para chamar updateUser({ password }) diretamente.
-  if (type === "recovery") {
-    return NextResponse.redirect(`${origin}/reset-password`)
-  }
+    const loginUrl = new URL("/login", origin);
+    loginUrl.searchParams.set("error", "callback_sem_code");
 
-  return NextResponse.redirect(`${origin}${next}`)
+    return NextResponse.redirect(loginUrl);
+  } catch (err) {
+    console.error("Callback fatal error:", err);
+
+    return NextResponse.redirect(
+      new URL("/login?error=callback_error", request.url),
+    );
+  }
 }
