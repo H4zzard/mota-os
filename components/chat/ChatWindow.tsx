@@ -42,7 +42,7 @@ interface ChatWindowProps {
   selectedAgent?: AgentWithConfig | null;
   rightPanelOpen: boolean;
   onAgentChange: (a: AgentWithConfig) => void;
-  onSend: (text: string, aiMode: AIMode, attachmentIds: string[]) => void;
+  onSend: (text: string, aiMode: AIMode, attachmentIds: string[], pendingSourceIds?: string[]) => void;
   onRegenerate?: (messageId: string) => void;
   onToggleRightPanel: () => void;
   onSourcesChanged?: () => void;

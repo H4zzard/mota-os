@@ -32,7 +32,7 @@ interface KnowledgeSource {
 interface ChatInputProps {
   selectedAgent?:    AgentWithConfig | null
   onAgentChange:     (a: AgentWithConfig) => void
-  onSend:            (text: string, aiMode: AIMode, attachmentIds: string[]) => void
+  onSend:            (text: string, aiMode: AIMode, attachmentIds: string[], pendingSourceIds?: string[]) => void
   agents?:           AgentWithConfig[]
   disabled?:         boolean
   sessionId?:        string | null
@@ -42,13 +42,15 @@ interface ChatInputProps {
 
 // ─── Sources popup ────────────────────────────────────────────────────────────
 
-function SourcesPopup({ sessionId, companyId, onSourcesChanged }: {
+function SourcesPopup({ sessionId, companyId, onSourcesChanged, pendingIds, onPendingToggle }: {
   sessionId?: string | null
   companyId?: string
   onSourcesChanged?: () => void
+  pendingIds?: string[]
+  onPendingToggle?: (id: string, linked: boolean) => void
 }) {
   const [sources, setSources]   = useState<KnowledgeSource[]>([])
-  const [linked, setLinked]     = useState<Set<string>>(new Set())
+  const [linked, setLinked]     = useState<Set<string>>(() => !sessionId ? new Set(pendingIds ?? []) : new Set())
   const [loading, setLoading]   = useState(true)
   const [toggling, setToggling] = useState<Set<string>>(new Set())
 
@@ -72,9 +74,21 @@ function SourcesPopup({ sessionId, companyId, onSourcesChanged }: {
   useEffect(() => { void load() }, [load])
 
   async function toggle(sourceId: string) {
-    if (!sessionId) return
-    setToggling((prev) => new Set([...prev, sourceId]))
     const isLinked = linked.has(sourceId)
+
+    if (!sessionId) {
+      // Pré-sessão: atualiza estado local e notifica pai com os IDs pendentes
+      setLinked((prev) => {
+        const next = new Set(prev)
+        if (isLinked) next.delete(sourceId)
+        else next.add(sourceId)
+        return next
+      })
+      onPendingToggle?.(sourceId, !isLinked)
+      return
+    }
+
+    setToggling((prev) => new Set([...prev, sourceId]))
     if (isLinked) {
       const res = await fetch("/api/session-sources", {
         method: "DELETE", headers: { "Content-Type": "application/json" },
@@ -91,11 +105,6 @@ function SourcesPopup({ sessionId, companyId, onSourcesChanged }: {
     setToggling((prev) => { const next = new Set(prev); next.delete(sourceId); return next })
   }
 
-  if (!sessionId) return (
-    <p className="text-xs px-3 py-3" style={{ color: "var(--text-muted)" }}>
-      Envie uma mensagem primeiro para vincular fontes à sessão.
-    </p>
-  )
   if (loading) return (
     <div className="flex items-center justify-center py-5 gap-2">
       <Loader2 size={14} className="animate-spin" style={{ color: "var(--text-muted)" }} />
@@ -138,16 +147,28 @@ export function ChatInput({
   selectedAgent, onAgentChange, onSend, agents, disabled,
   sessionId, companyId, onSourcesChanged,
 }: ChatInputProps) {
-  const [value, setValue]               = useState("")
-  const [aiMode, setAiMode]             = useState<AIMode>("jarvis")
-  const [aiModeOpen, setAiModeOpen]     = useState(false)
-  const [sourcesOpen, setSourcesOpen]   = useState(false)
-  const [slashAgents, setSlashAgents]   = useState<SlashAgentPublic[]>([])
-  const [highlightIdx, setHighlightIdx] = useState(0)
-  const [attachments, setAttachments]   = useState<PendingAttachment[]>([])
-  const [uploadErr, setUploadErr]       = useState<string | null>(null)
+  const [value, setValue]                       = useState("")
+  const [aiMode, setAiMode]                     = useState<AIMode>("jarvis")
+  const [aiModeOpen, setAiModeOpen]             = useState(false)
+  const [sourcesOpen, setSourcesOpen]           = useState(false)
+  const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([])
+  const [slashAgents, setSlashAgents]           = useState<SlashAgentPublic[]>([])
+  const [highlightIdx, setHighlightIdx]         = useState(0)
+  const [attachments, setAttachments]           = useState<PendingAttachment[]>([])
+  const [uploadErr, setUploadErr]               = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Limpa fontes pendentes quando a sessão é criada (fontes já vinculadas pelo backend)
+  useEffect(() => {
+    if (sessionId) setPendingSourceIds([])
+  }, [sessionId])
+
+  function handlePendingToggle(id: string, linked: boolean) {
+    setPendingSourceIds((prev) =>
+      linked ? [...prev, id] : prev.filter((x) => x !== id)
+    )
+  }
 
   // Carrega slash agents na montagem
   useEffect(() => {
@@ -277,7 +298,8 @@ export function ChatInput({
     if (attachments.some(a => a.error))     { setUploadErr("Remova os arquivos com erro antes de enviar."); return }
 
     const uploadedIds = attachments.filter(a => a.uploadedId).map(a => a.uploadedId!)
-    onSend(trimmed, aiMode, uploadedIds)
+    const currentPending = pendingSourceIds
+    onSend(trimmed, aiMode, uploadedIds, currentPending.length > 0 ? currentPending : undefined)
     setValue("")
     setAttachments([])
     setUploadErr(null)
@@ -394,9 +416,15 @@ export function ChatInput({
               <button onClick={() => setSourcesOpen((v) => !v)}
                 className={cn("w-7 h-7 flex items-center justify-center rounded-lg transition-colors",
                   sourcesOpen ? "bg-mota-600/15 text-mota-500" : "hover:bg-[var(--bg-hover)]")}
-                style={{ color: sourcesOpen ? undefined : "var(--text-muted)" }}
+                style={{ color: sourcesOpen ? undefined : pendingSourceIds.length > 0 ? "#3b82f6" : "var(--text-muted)" }}
                 title="Selecionar fontes">
                 <Database size={14} />
+                {!sessionId && pendingSourceIds.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[8px] font-bold flex items-center justify-center text-white"
+                    style={{ background: "#3b82f6" }}>
+                    {pendingSourceIds.length}
+                  </span>
+                )}
               </button>
               <AnimatePresence>
                 {sourcesOpen && (
@@ -411,13 +439,25 @@ export function ChatInput({
                         <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
                           Fontes de conhecimento
                         </span>
+                        {!sessionId && pendingSourceIds.length > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                            style={{ background: "rgba(59,130,246,0.12)", color: "#3b82f6" }}>
+                            {pendingSourceIds.length} selecionada{pendingSourceIds.length > 1 ? "s" : ""}
+                          </span>
+                        )}
                         <button onClick={() => setSourcesOpen(false)}
                           className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]"
                           style={{ color: "var(--text-muted)" }}>
                           <X size={12} />
                         </button>
                       </div>
-                      <SourcesPopup sessionId={sessionId} companyId={companyId} onSourcesChanged={onSourcesChanged} />
+                      <SourcesPopup
+                        sessionId={sessionId}
+                        companyId={companyId}
+                        onSourcesChanged={onSourcesChanged}
+                        pendingIds={pendingSourceIds}
+                        onPendingToggle={handlePendingToggle}
+                      />
                     </motion.div>
                   </>
                 )}

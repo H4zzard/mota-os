@@ -29,16 +29,17 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json() as {
-    messages:          { role: "user" | "assistant"; content: string }[]
-    system?:           string
-    session_id?:       string | null
-    agent_id?:         string | null
-    user_message:      string
-    company_id?:       string
-    provider?:         AIProvider
-    model?:            string
-    selected_ai_mode?: string
-    attachment_ids?:   string[]
+    messages:            { role: "user" | "assistant"; content: string }[]
+    system?:             string
+    session_id?:         string | null
+    agent_id?:           string | null
+    user_message:        string
+    company_id?:         string
+    provider?:           AIProvider
+    model?:              string
+    selected_ai_mode?:   string
+    attachment_ids?:     string[]
+    pending_source_ids?: string[]
   }
 
   // ─── Sanitização: só aceitar roles válidos no histórico ──────────────────
@@ -260,85 +261,156 @@ export async function POST(req: NextRequest) {
       )
     }
     sid = sess.id as string
+
+    // Vincula fontes pré-selecionadas antes da primeira mensagem (Opção 1)
+    if (body.pending_source_ids && body.pending_source_ids.length > 0) {
+      try {
+        const { data: validSources } = await admin
+          .from("knowledge_sources")
+          .select("id")
+          .in("id", body.pending_source_ids)
+          .eq("company_id", resolvedCompany)
+          .eq("status", "active")
+
+        if (validSources && validSources.length > 0) {
+          await admin
+            .from("session_sources")
+            .upsert(
+              validSources.map((s) => ({ session_id: sid, source_id: s.id })),
+              { onConflict: "session_id,source_id" },
+            )
+        }
+      } catch (pendingErr) {
+        console.warn("[chat] Erro ao vincular fontes pendentes:", pendingErr)
+      }
+    }
   }
 
-  // ─── Contexto de conhecimento (RAG semântico + fallback full-text) ──────────
+  // ─── Contexto de conhecimento (RAG semântico + fallback + auto-detecção) ─────
   {
     try {
+      // 1. Fontes vinculadas à sessão
       const { data: rows } = await admin
         .from("session_sources")
         .select("source_id, knowledge_sources(id, name, type, content, embedding_status)")
         .eq("session_id", sid)
 
-      if (rows && rows.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sources = rows.map(r => (r as any).knowledge_sources as {
-          id: string; name: string; type: string; content: string | null; embedding_status: string | null
-        } | null).filter(Boolean) as { id: string; name: string; type: string; content: string | null; embedding_status: string | null }[]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sources = (rows ?? []).map(r => (r as any).knowledge_sources as {
+        id: string; name: string; type: string; content: string | null; embedding_status: string | null
+      } | null).filter(Boolean) as { id: string; name: string; type: string; content: string | null; embedding_status: string | null }[]
 
-        const indexedIds = sources.filter(s => s.embedding_status === "done").map(s => s.id)
-        let injectedCtx = false
+      const sessionSourceIds = new Set(sources.map(s => s.id))
+      const indexedIds = sources.filter(s => s.embedding_status === "done").map(s => s.id)
 
-        // ── Tentativa RAG semântico ─────────────────────────────────────
-        if (indexedIds.length > 0) {
-          try {
-            const queryEmbedding = await embedText(body.user_message.slice(0, 2000))
-            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
-              query_embedding:   `[${queryEmbedding.join(",")}]`,
-              match_count:       8,
-              filter_company:    resolvedCompany,
-              filter_agent_id:   null,
-              filter_source_ids: indexedIds,
-              min_similarity:    0.35,
-            })
+      // 2. Todas as fontes indexadas da empresa (para auto-detecção)
+      const { data: allIndexed } = await admin
+        .from("knowledge_sources")
+        .select("id, name, type, embedding_status")
+        .eq("company_id", resolvedCompany)
+        .eq("status", "active")
+        .eq("embedding_status", "done")
 
-            if (chunks && chunks.length > 0) {
-              const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
-                .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
-              const ctx = `\n\nFONTES DE CONHECIMENTO (busca semântica — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
-              system = (system ?? "") + ctx
-              injectedCtx = true
+      const nonSessionIndexed = (allIndexed ?? []).filter(s => !sessionSourceIds.has(s.id))
 
-              void logActivity({
-                userId:    user.id,
-                eventType: "source",
-                action:    "chat_rag_injected",
-                detail:    `${parts.length} trecho(s) semântico(s)`,
-                sessionId: sid as string,
-                companyId: resolvedCompany,
-              })
-            }
-          } catch (ragErr) {
-            console.warn("[chat] RAG falhou, usando fallback full-text:", ragErr)
-          }
+      // 3. Gera embedding uma vez (usado por RAG selecionado + auto-detecção)
+      let queryEmbedding: number[] | null = null
+      if (indexedIds.length > 0 || nonSessionIndexed.length > 0) {
+        try {
+          queryEmbedding = await embedText(body.user_message.slice(0, 2000))
+        } catch (embErr) {
+          console.warn("[chat] Embedding falhou:", embErr)
         }
+      }
 
-        // ── Fallback: injetar conteúdo completo (fontes sem embedding) ──
-        if (!injectedCtx) {
-          const CONTEXT_CHAR_LIMIT = 40_000
-          const parts: string[] = []
-          let totalChars = 0
+      let injectedCtx = false
 
-          for (const src of sources) {
-            if (!src.content) continue
-            const remaining = CONTEXT_CHAR_LIMIT - totalChars
-            if (remaining <= 0) break
-            const excerpt = src.content.slice(0, remaining)
-            parts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
-            totalChars += excerpt.length
-          }
+      // 4. RAG semântico nas fontes selecionadas
+      if (indexedIds.length > 0 && queryEmbedding) {
+        try {
+          const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+            query_embedding:   `[${queryEmbedding.join(",")}]`,
+            match_count:       8,
+            filter_company:    resolvedCompany,
+            filter_agent_id:   null,
+            filter_source_ids: indexedIds,
+            min_similarity:    0.35,
+          })
 
-          if (parts.length > 0) {
-            system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS:\n${parts.join("\n\n")}\n`
+          if (chunks && chunks.length > 0) {
+            const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
+              .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
+            system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO (busca semântica — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
+            injectedCtx = true
 
             void logActivity({
-              userId:    user.id,
-              eventType: "source",
-              action:    "chat_fulltext_injected",
-              detail:    `${parts.length} fonte(s) — ${totalChars} chars`,
-              sessionId: sid as string,
+              userId: user.id, eventType: "source", action: "chat_rag_injected",
+              detail: `${parts.length} trecho(s) semântico(s)`, sessionId: sid as string, companyId: resolvedCompany,
             })
           }
+        } catch (ragErr) {
+          console.warn("[chat] RAG falhou, usando fallback full-text:", ragErr)
+        }
+      }
+
+      // 5. Fallback full-text (fontes sem embedding)
+      if (!injectedCtx && sources.length > 0) {
+        const CONTEXT_CHAR_LIMIT = 40_000
+        const parts: string[] = []
+        let totalChars = 0
+
+        for (const src of sources) {
+          if (!src.content) continue
+          const remaining = CONTEXT_CHAR_LIMIT - totalChars
+          if (remaining <= 0) break
+          const excerpt = src.content.slice(0, remaining)
+          parts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
+          totalChars += excerpt.length
+        }
+
+        if (parts.length > 0) {
+          system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS:\n${parts.join("\n\n")}\n`
+          void logActivity({
+            userId: user.id, eventType: "source", action: "chat_fulltext_injected",
+            detail: `${parts.length} fonte(s) — ${totalChars} chars`, sessionId: sid as string,
+          })
+        }
+      }
+
+      // 6. Auto-detecção: busca fontes relevantes não selecionadas (threshold mais alto)
+      if (nonSessionIndexed.length > 0 && queryEmbedding) {
+        try {
+          const { data: autoChunks } = await admin.rpc("match_knowledge_chunks", {
+            query_embedding:   `[${queryEmbedding.join(",")}]`,
+            match_count:       4,
+            filter_company:    resolvedCompany,
+            filter_agent_id:   null,
+            filter_source_ids: nonSessionIndexed.map(s => s.id),
+            min_similarity:    0.5,
+          })
+
+          if (autoChunks && autoChunks.length > 0) {
+            type AutoChunk = { knowledge_source_id?: string; title?: string | null; source_type?: string | null; content: string }
+            const chunkList = autoChunks as AutoChunk[]
+
+            // Mapeia IDs de fonte detectados para nomes
+            const sourceMap = new Map(nonSessionIndexed.map(s => [s.id, s.name]))
+            const detectedIds = [...new Set(chunkList.map(c => c.knowledge_source_id).filter((id): id is string => Boolean(id)))]
+            const detectedNames = detectedIds.map(id => sourceMap.get(id) ?? id)
+
+            const autoParts = chunkList.map(c => `[${c.title ?? c.source_type ?? "Auto"}]\n${c.content}`)
+            system = (system ?? "")
+              + `\n\nFONTES ADICIONAIS DETECTADAS AUTOMATICAMENTE (${detectedNames.join(", ")}):\n`
+              + autoParts.join("\n\n---\n\n")
+              + `\n\nInstrução ao assistente: mencione explicitamente ao usuário que as seguintes fontes foram identificadas automaticamente como relevantes e usadas nesta resposta: ${detectedNames.join(", ")}.\n`
+
+            void logActivity({
+              userId: user.id, eventType: "source", action: "chat_auto_detected",
+              detail: detectedNames.join(", "), sessionId: sid as string, companyId: resolvedCompany,
+            })
+          }
+        } catch (autoErr) {
+          console.warn("[chat] Auto-detecção falhou:", autoErr)
         }
       }
     } catch (ctxErr) {

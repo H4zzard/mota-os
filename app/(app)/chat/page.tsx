@@ -138,6 +138,7 @@ export default function ChatPage() {
       text: string,
       aiMode: AIMode = "jarvis",
       attachmentIds: string[] = [],
+      pendingSourceIds: string[] = [],
     ) => {
       if (!text.trim() || isTyping) return;
 
@@ -195,6 +196,8 @@ export default function ChatPage() {
             selected_ai_mode: aiMode,
             attachment_ids:
               attachmentIds.length > 0 ? attachmentIds : undefined,
+            pending_source_ids:
+              pendingSourceIds.length > 0 ? pendingSourceIds : undefined,
           }),
           signal: abortRef.current.signal,
         });
