@@ -139,13 +139,20 @@ async function* streamGemini(params: AIStreamParams): AsyncGenerator<AIChunk> {
   let useServiceAccount              = false
 
   if (!process.env.GEMINI_API_KEY) {
-    token = await getServiceAccountToken()
-    if (token) {
+    // Se GOOGLE_SERVICE_ACCOUNT_KEY está configurado, EXIGIMOS o service account.
+    // Não cair silenciosamente no OAuth do usuário: isso mascarava o erro real
+    // (ex: projeto do service account deletado) com o erro do projeto OAuth.
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      token = await getServiceAccountToken()
+      if (!token) {
+        yield { done: true, text: "", error: "[gemini] GOOGLE_SERVICE_ACCOUNT_KEY está configurado mas a autenticação falhou. Verifique se o projeto Google Cloud do service account existe/está ativo e se a Generative Language API está habilitada. (ver logs [gemini-sa])" }
+        return
+      }
       useServiceAccount = true
     } else {
       token = await getValidGeminiToken()
       if (!token) {
-        yield { done: true, text: "", error: "[gemini] Sem credenciais. Configure GEMINI_API_KEY, GOOGLE_SERVICE_ACCOUNT_KEY ou autentique via /api/auth/google/login." }
+        yield { done: true, text: "", error: "[gemini] Sem credenciais. Configure GOOGLE_SERVICE_ACCOUNT_KEY ou autentique via /api/auth/google/login." }
         return
       }
     }

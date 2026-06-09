@@ -27,6 +27,12 @@
 .DS_Store
 *.pem
 
+# google service account keys (NUNCA commitar — use GOOGLE_SERVICE_ACCOUNT_KEY no env)
+*-service-account*.json
+savvy-courage-*.json
+gcp-*.json
+*.serviceaccount.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

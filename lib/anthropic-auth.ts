@@ -27,9 +27,45 @@
  * exchange de federation primeiro).
  */
 
+import os from "node:os"
+
 type TokenCache = { token: string; expiresAt: number } | null
 
 let _cache: TokenCache = null
+
+/**
+ * CAUSA RAIZ do "Could not resolve authentication method" no Vercel:
+ *
+ * Antes de sintetizar o config de federation a partir das env vars
+ * (ANTHROPIC_FEDERATION_RULE_ID + ANTHROPIC_ORGANIZATION_ID), o SDK exige um
+ * "config root" resolvível via getRootConfigPath(). Essa função retorna null
+ * quando NENHUMA destas existe: ANTHROPIC_CONFIG_DIR, APPDATA/USERPROFILE
+ * (Windows), XDG_CONFIG_HOME, HOME.
+ *
+ * Em localhost (Windows) há APPDATA → funciona. No Vercel (serverless Linux)
+ * HOME frequentemente NÃO é definido → getRootConfigPath() retorna null →
+ * loadConfigWithSource() retorna null ANTES de olhar as env vars → o SDK
+ * dispara "Could not resolve authentication method", mesmo com todas as
+ * variáveis de federation corretamente configuradas.
+ *
+ * Setar ANTHROPIC_CONFIG_DIR (maior precedência) para um diretório sempre
+ * existente (os.tmpdir()) destrava a síntese via env vars. Não há arquivo de
+ * config lá, então o SDK cai no caminho de síntese e usa as env vars + o
+ * identity token de ANTHROPIC_IDENTITY_TOKEN. Idempotente e seguro em ambos os
+ * ambientes.
+ */
+function ensureConfigRoot(): void {
+  if (
+    !process.env.ANTHROPIC_CONFIG_DIR &&
+    !process.env.HOME &&
+    !process.env.XDG_CONFIG_HOME &&
+    !process.env.APPDATA &&
+    !process.env.USERPROFILE
+  ) {
+    process.env.ANTHROPIC_CONFIG_DIR = os.tmpdir()
+    console.log(`[anthropic-auth] ANTHROPIC_CONFIG_DIR definido para ${process.env.ANTHROPIC_CONFIG_DIR} (config root ausente no ambiente)`)
+  }
+}
 
 /**
  * Garante que o SDK Anthropic tenha credenciais resolvíveis.
@@ -43,6 +79,9 @@ let _cache: TokenCache = null
 export async function ensureAnthropicCredentials(): Promise<void> {
   // API key estática — preferência absoluta, sem Auth0
   if (process.env.ANTHROPIC_API_KEY) return
+
+  // Destrava a síntese do config de federation em serverless (ver ensureConfigRoot)
+  ensureConfigRoot()
 
   const { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET } = process.env
   if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
@@ -87,6 +126,27 @@ export async function ensureAnthropicCredentials(): Promise<void> {
   applyIdentityToken(_cache.token)
 
   console.log(`[anthropic-auth] JWT obtido, válido por ${expiresIn}s. Federation exchange fica a cargo do SDK.`)
+
+  // O SDK só sintetiza o config de federation se ANTHROPIC_FEDERATION_RULE_ID
+  // E ANTHROPIC_ORGANIZATION_ID estiverem presentes. Sem elas, o SDK lança o
+  // críptico "Could not resolve authentication method". Validar aqui dá um erro
+  // acionável apontando exatamente o que falta no ambiente (ex: no Vercel).
+  assertFederationEnv()
+}
+
+function assertFederationEnv(): void {
+  const faltando = [
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+  ].filter((k) => !process.env[k] || process.env[k]!.trim().length === 0)
+
+  if (faltando.length > 0) {
+    throw new Error(
+      `Anthropic WIF incompleto: variáveis ausentes no ambiente: ${faltando.join(", ")}. ` +
+      "Cadastre-as no Vercel (Settings → Environment Variables) junto com " +
+      "ANTHROPIC_SERVICE_ACCOUNT_ID e ANTHROPIC_WORKSPACE_ID, e faça Redeploy.",
+    )
+  }
 }
 
 /**
