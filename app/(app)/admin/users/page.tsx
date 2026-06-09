@@ -13,9 +13,13 @@ import {
   Check,
   Trash2,
   Shield,
+  ShieldOff,
   Building2,
+  Lock,
 } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
+import { useCompany } from "@/components/providers/CompanyProvider"
+import { createClient } from "@/lib/supabase-browser"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,12 +85,16 @@ function avatarColor(email: string) {
 
 function EditUserModal({
   user,
+  currentUserId,
   onClose,
   onSaved,
+  onDeleted,
 }: {
-  user:    UserProfile
-  onClose: () => void
-  onSaved: (u: UserProfile) => void
+  user:          UserProfile
+  currentUserId: string | null
+  onClose:       () => void
+  onSaved:       (u: UserProfile) => void
+  onDeleted:     (id: string) => void
 }) {
   const [name,      setName]      = useState(user.name ?? "")
   const [jobTitle,  setJobTitle]  = useState(user.job_title ?? "")
@@ -102,6 +110,14 @@ function EditUserModal({
   const [addCo,     setAddCo]     = useState("")
   const [addRole,   setAddRole]   = useState("member")
 
+  const [togglingAdmin, setTogglingAdmin] = useState(false)
+  const [linkingAll,    setLinkingAll]    = useState(false)
+  const [deleting,      setDeleting]      = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const isSelf  = currentUserId === user.id
+  const isAdminRole = role === "admin"
+
   useEffect(() => {
     fetch(`/api/users/${user.id}/companies`)
       .then((r) => r.json() as Promise<{ members?: CompanyMember[] }>)
@@ -109,6 +125,67 @@ function EditUserModal({
       .catch(() => {})
       .finally(() => setLoadingM(false))
   }, [user.id])
+
+  // Promove/rebaixa admin imediatamente (sem precisar salvar o perfil inteiro)
+  async function handleToggleAdmin() {
+    const next = isAdminRole ? "member" : "admin"
+    setTogglingAdmin(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: next }),
+      })
+      const json = await res.json() as { user?: UserProfile; error?: string }
+      if (!res.ok) throw new Error(json.error ?? "Erro ao alterar papel")
+      setRole(next)
+      onSaved({ ...user, ...json.user!, companies: user.companies, company_roles: user.company_roles })
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao alterar papel")
+    } finally {
+      setTogglingAdmin(false)
+    }
+  }
+
+  // Vincula o usuário a TODAS as empresas de uma vez
+  async function handleLinkAllCompanies() {
+    setLinkingAll(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/users/${user.id}/companies`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true, role: "member" }),
+      })
+      const json = await res.json() as { members?: CompanyMember[]; error?: string }
+      if (!res.ok) throw new Error(json.error ?? "Erro ao vincular empresas")
+      // Recarrega a lista de vínculos
+      const refreshed = await fetch(`/api/users/${user.id}/companies`)
+        .then((r) => r.json() as Promise<{ members?: CompanyMember[] }>)
+      setMembers(refreshed.members ?? [])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao vincular empresas")
+    } finally {
+      setLinkingAll(false)
+    }
+  }
+
+  // Exclui o usuário definitivamente
+  async function handleDelete() {
+    setDeleting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" })
+      const json = await res.json() as { ok?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error ?? "Erro ao excluir usuário")
+      onDeleted(user.id)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao excluir usuário")
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
 
   async function handleSaveProfile() {
     setSaving(true)
@@ -305,9 +382,20 @@ function EditUserModal({
 
           {/* Company memberships */}
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-              Empresas vinculadas
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+                Empresas vinculadas
+              </p>
+              <button
+                onClick={() => void handleLinkAllCompanies()}
+                disabled={linkingAll}
+                className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+              >
+                {linkingAll ? <Loader2 size={11} className="animate-spin" /> : <Building2 size={11} />}
+                Vincular a todas
+              </button>
+            </div>
 
             {loadingM ? (
               <div className="flex justify-center py-4">
@@ -386,6 +474,72 @@ function EditUserModal({
             )}
           </div>
 
+          {/* Ações administrativas */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+              Ações administrativas
+            </p>
+
+            {/* Toggle admin */}
+            <button
+              onClick={() => void handleToggleAdmin()}
+              disabled={togglingAdmin}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              style={{ borderColor: "var(--border-color)" }}
+            >
+              {togglingAdmin
+                ? <Loader2 size={14} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+                : isAdminRole
+                  ? <ShieldOff size={14} className="text-amber-400" />
+                  : <Shield size={14} className="text-violet-400" />
+              }
+              <span className="flex-1 text-left text-xs" style={{ color: "var(--text-primary)" }}>
+                {isAdminRole ? "Remover admin global" : "Tornar admin global"}
+              </span>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {isAdminRole ? "Admin" : "Membro"}
+              </span>
+            </button>
+
+            {/* Excluir usuário */}
+            {!confirmDelete ? (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                disabled={isSelf}
+                title={isSelf ? "Você não pode excluir a própria conta" : undefined}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-red-500/30 text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              >
+                <Trash2 size={14} />
+                <span className="flex-1 text-left text-xs">Excluir usuário</span>
+                {isSelf && <Lock size={12} />}
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2 p-3 rounded-lg border border-red-500/30 bg-red-500/5">
+                <p className="text-xs text-red-300">
+                  Excluir <strong>{user.name ?? user.email}</strong> permanentemente? Esta ação remove o login, o perfil e todos os vínculos. Não pode ser desfeita.
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    disabled={deleting}
+                    className="flex-1 text-xs px-3 py-1.5 rounded-lg border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                    style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => void handleDelete()}
+                    disabled={deleting}
+                    className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    Excluir definitivamente
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {error && (
             <p className="text-xs text-red-400 flex items-center gap-1.5">
               <AlertCircle size={12} /> {error}
@@ -422,12 +576,21 @@ function EditUserModal({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminUsersPage() {
+  const { isAdmin, loading: companyLoading } = useCompany()
+
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [users,    setUsers]    = useState<UserProfile[]>([])
   const [loading,  setLoading]  = useState(true)
   const [fetchErr, setFetchErr] = useState<string | null>(null)
   const [search,   setSearch]   = useState("")
   const [editing,  setEditing]  = useState<UserProfile | null>(null)
   const [companyFilter, setCompanyFilter] = useState("")
+
+  useEffect(() => {
+    createClient().auth.getUser()
+      .then(({ data }) => setCurrentUserId(data.user?.id ?? null))
+      .catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -452,11 +615,45 @@ export default function AdminUsersPage() {
 
   function handleSaved(updated: UserProfile) {
     setUsers((prev) => prev.map((u) => u.id === updated.id ? updated : u))
+  }
+
+  function handleDeleted(id: string) {
+    setUsers((prev) => prev.filter((u) => u.id !== id))
     setEditing(null)
   }
 
   const adminCount  = users.filter((u) => u.role === "admin").length
   const activeCount = users.filter((u) => u.companies.length > 0).length
+
+  // Enquanto o contexto de permissões carrega, evita flash da tela para não-admin
+  if (companyLoading) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <PageHeader title="Gestão de Usuários" subtitle="Carregando…" />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={22} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+        </div>
+      </div>
+    )
+  }
+
+  // ─── Gate de admin: apenas admin global acessa esta tela ────────────────────
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <PageHeader title="Gestão de Usuários" subtitle="Acesso restrito" />
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
+          <Lock size={28} style={{ color: "var(--text-muted)" }} />
+          <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+            Acesso restrito a administradores
+          </p>
+          <p className="text-xs text-center max-w-sm" style={{ color: "var(--text-muted)" }}>
+            Apenas administradores globais podem gerenciar usuários, papéis e vínculos de empresa.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -668,8 +865,10 @@ export default function AdminUsersPage() {
         {editing && (
           <EditUserModal
             user={editing}
+            currentUserId={currentUserId}
             onClose={() => setEditing(null)}
             onSaved={handleSaved}
+            onDeleted={handleDeleted}
           />
         )}
       </AnimatePresence>

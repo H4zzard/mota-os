@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server"
-import { createClient }      from "@/lib/supabase-server"
-import { createAdminClient } from "@/lib/supabase-admin"
-import { isGlobalAdmin }     from "@/lib/company-scope"
+import { createClient }            from "@/lib/supabase-server"
+import { createAdminClient }       from "@/lib/supabase-admin"
+import { isGlobalAdmin, ALL_SLUGS } from "@/lib/company-scope"
 
 export const dynamic = "force-dynamic"
 
@@ -68,6 +68,50 @@ export async function POST(
   if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ member: data })
+}
+
+// ─── PUT — vincular a várias empresas de uma vez (ex: todas) ──────────────────
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+
+  const isAdmin = await isGlobalAdmin(user.id)
+  if (!isAdmin) return NextResponse.json({ error: "Sem permissão" }, { status: 403 })
+
+  const body = await req.json() as { all?: boolean; company_ids?: string[]; role?: string }
+  const role = body.role ?? "member"
+
+  // all=true vincula a TODAS as empresas conhecidas; senão usa a lista fornecida
+  const targets = body.all
+    ? [...ALL_SLUGS]
+    : (body.company_ids ?? []).filter((c) => (ALL_SLUGS as string[]).includes(c))
+
+  if (targets.length === 0) {
+    return NextResponse.json({ error: "Nenhuma empresa válida informada." }, { status: 400 })
+  }
+
+  const admin = createAdminClient()
+  const rows = targets.map((company_id) => ({
+    user_id:    id,
+    company_id,
+    role,
+    status:     "active",
+  }))
+
+  const { data, error } = await admin
+    .from("company_members")
+    .upsert(rows, { onConflict: "user_id,company_id" })
+    .select("company_id, role, status")
+
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
+
+  return NextResponse.json({ members: data ?? [] })
 }
 
 // ─── DELETE — remover vínculo ─────────────────────────────────────────────────

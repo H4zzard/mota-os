@@ -131,3 +131,84 @@ export async function PATCH(
 
   return NextResponse.json({ user: data })
 }
+
+// ─── DELETE — excluir usuário (auth + profile + vínculos) ─────────────────────
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+
+  const isAdmin = await isGlobalAdmin(user.id)
+  if (!isAdmin) {
+    return denyAccess({ req, userId: user.id, reason: "not_admin" })
+  }
+
+  // Não permitir que o admin exclua a si mesmo (evita lockout acidental)
+  if (user.id === id) {
+    return NextResponse.json(
+      { error: "Você não pode excluir a própria conta." },
+      { status: 409 },
+    )
+  }
+
+  const admin = createAdminClient()
+
+  // Buscar alvo para registro de log e proteção do último admin
+  const { data: target } = await admin
+    .from("profiles")
+    .select("role, email, name")
+    .eq("id", id)
+    .single()
+
+  if (!target) {
+    return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+  }
+
+  // Bloquear exclusão do último admin global
+  if (target.role === "admin") {
+    const { count } = await admin
+      .from("profiles")
+      .select("*", { count: "exact", head: true })
+      .eq("role", "admin")
+
+    if ((count ?? 0) <= 1) {
+      return NextResponse.json(
+        { error: "Não é possível excluir o único administrador do sistema. Promova outro usuário a admin primeiro." },
+        { status: 409 },
+      )
+    }
+  }
+
+  // Remover vínculos de empresa (caso não haja cascade no banco)
+  await admin.from("company_members").delete().eq("user_id", id)
+
+  // Remover perfil
+  const { error: profileErr } = await admin.from("profiles").delete().eq("id", id)
+  if (profileErr) {
+    return NextResponse.json({ error: "Erro ao remover perfil do usuário" }, { status: 500 })
+  }
+
+  // Remover usuário de auth (definitivo). Se falhar, o perfil já saiu — reportar.
+  const { error: authErr } = await admin.auth.admin.deleteUser(id)
+  if (authErr) {
+    return NextResponse.json(
+      { error: `Perfil removido, mas falha ao excluir credenciais de login: ${authErr.message}` },
+      { status: 500 },
+    )
+  }
+
+  void logActivity({
+    userId:    user.id,
+    eventType: "settings",
+    action:    "user_deleted",
+    detail:    (target.name as string) || (target.email as string),
+    metadata:  { target_user_id: id, target_email: target.email },
+  })
+
+  return NextResponse.json({ ok: true })
+}
