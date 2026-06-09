@@ -38,8 +38,18 @@ function isProviderConfigured(provider: string): boolean {
         process.env.ANTHROPIC_API_KEY ||
         (process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET)
       )
-    case "openai":    return !!process.env.OPENAI_API_KEY
-    case "gemini":    return !!(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+    case "openai":
+      // API key estática OU OAuth/Codex (client OAuth configurado)
+      return !!(process.env.OPENAI_API_KEY || process.env.OPENAI_OAUTH_CLIENT_ID)
+    case "gemini":
+      // Nomes reais usados no projeto: GEMINI_API_KEY (gemini.ts) e
+      // GOOGLE_SERVICE_ACCOUNT_KEY (gemini-service-account.ts).
+      // GOOGLE_CLIENT_ID cobre o fluxo de OAuth do usuário.
+      return !!(
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_SERVICE_ACCOUNT_KEY ||
+        process.env.GOOGLE_CLIENT_ID
+      )
     case "deepseek":  return !!process.env.DEEPSEEK_API_KEY
     default:          return false
   }

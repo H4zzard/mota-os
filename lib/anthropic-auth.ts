@@ -1,14 +1,30 @@
 /**
- * Gerencia credenciais Anthropic para ambientes sem API key estática (Vercel, etc).
+ * Credenciais Anthropic via WIF (Workload Identity Federation) sem arquivo em disco.
  *
- * Ordem de prioridade:
- *   1. ANTHROPIC_API_KEY — se definida, usada diretamente (sem Auth0).
- *   2. Auth0 WIF         — busca JWT via client_credentials e usa como authToken.
+ * Como o WIF da Anthropic funciona (confirmado em @anthropic-ai/sdk):
+ *   1. Um JWT externo (subject token) é emitido pelo Auth0 (client_credentials,
+ *      audience https://api.anthropic.com).
+ *   2. O SDK Anthropic troca esse JWT pela federation rule (RFC 7523 jwt-bearer)
+ *      por um access token Anthropic temporário — internamente, em toda request.
+ *   3. O SDK lê o JWT de:
+ *        a. ANTHROPIC_IDENTITY_TOKEN_FILE  (caminho de arquivo) — precedência maior
+ *        b. ANTHROPIC_IDENTITY_TOKEN       (valor direto)
+ *      e a config de federation de:
+ *        ANTHROPIC_FEDERATION_RULE_ID + ANTHROPIC_ORGANIZATION_ID
+ *        (+ ANTHROPIC_SERVICE_ACCOUNT_ID, ANTHROPIC_WORKSPACE_ID)
  *
- * O token Auth0 é cacheado em memória do processo. Em Vercel serverless:
- *   - Cold start: uma chamada Auth0 (~150-300ms), depois cacheado.
- *   - Warm container: zero chamadas extras (usa cache até 5 min antes do vencimento).
- *   - Token típico Auth0 client_credentials expira em 1 hora.
+ * Em localhost o arquivo `tmp/anthropic-token` é gerado pelo predev
+ * (scripts/refresh-anthropic-token.mjs). No Vercel esse script não roda e o
+ * filesystem é efêmero — por isso buscamos o JWT do Auth0 em runtime e o
+ * injetamos via ANTHROPIC_IDENTITY_TOKEN (valor), removendo a referência ao
+ * arquivo para não cair no provider de arquivo (que tem precedência).
+ *
+ * Resultado: o mesmo código funciona em localhost e no Vercel, sem depender
+ * de arquivo nem do predev. O SDK continua fazendo o federation exchange.
+ *
+ * NÃO usar `authToken` no construtor: lá o valor vira `Authorization: Bearer`
+ * direto para a API da Anthropic, que rejeita o JWT do Auth0 (ele precisa do
+ * exchange de federation primeiro).
  */
 
 type TokenCache = { token: string; expiresAt: number } | null
@@ -16,16 +32,18 @@ type TokenCache = { token: string; expiresAt: number } | null
 let _cache: TokenCache = null
 
 /**
- * Retorna o objeto de opções de auth para `new Anthropic({ ...opts })`.
- * Lança se nenhuma credencial estiver configurada.
+ * Garante que o SDK Anthropic tenha credenciais resolvíveis.
+ *
+ * - Se ANTHROPIC_API_KEY existe → não faz nada (key tem precedência no SDK).
+ * - Senão → busca o JWT do Auth0 (cacheado em memória) e o injeta em
+ *   ANTHROPIC_IDENTITY_TOKEN, removendo ANTHROPIC_IDENTITY_TOKEN_FILE.
+ *
+ * Lança se não houver API key nem variáveis Auth0 configuradas.
  */
-export async function getAnthropicAuthOptions(): Promise<{ apiKey: string } | { authToken: string }> {
-  // 1. API key estática — preferência (curto-circuito, sem Auth0)
-  if (process.env.ANTHROPIC_API_KEY) {
-    return { apiKey: process.env.ANTHROPIC_API_KEY }
-  }
+export async function ensureAnthropicCredentials(): Promise<void> {
+  // API key estática — preferência absoluta, sem Auth0
+  if (process.env.ANTHROPIC_API_KEY) return
 
-  // 2. WIF via Auth0
   const { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET } = process.env
   if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
     throw new Error(
@@ -37,10 +55,11 @@ export async function getAnthropicAuthOptions(): Promise<{ apiKey: string } | { 
 
   // Cache válido com 5 min de margem antes do vencimento
   if (_cache && Date.now() < _cache.expiresAt - 5 * 60_000) {
-    return { authToken: _cache.token }
+    applyIdentityToken(_cache.token)
+    return
   }
 
-  console.log("[anthropic-auth] Buscando token Auth0 para Anthropic WIF...")
+  console.log("[anthropic-auth] Buscando JWT do Auth0 para federation Anthropic...")
 
   const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
     method:  "POST",
@@ -54,28 +73,38 @@ export async function getAnthropicAuthOptions(): Promise<{ apiKey: string } | { 
   })
 
   if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`Auth0 retornou ${res.status} ao buscar token Anthropic: ${body}`)
+    const body = await res.text().catch(() => "")
+    throw new Error(`Auth0 retornou ${res.status} ao buscar JWT Anthropic: ${body}`)
   }
 
-  const json = await res.json() as { access_token: string; expires_in?: number }
-
+  const json = await res.json() as { access_token?: string; expires_in?: number }
   if (!json.access_token) {
     throw new Error("Auth0 não retornou access_token para Anthropic.")
   }
 
   const expiresIn = json.expires_in ?? 3600
   _cache = { token: json.access_token, expiresAt: Date.now() + expiresIn * 1000 }
+  applyIdentityToken(_cache.token)
 
-  console.log(`[anthropic-auth] Token obtido, válido por ${expiresIn}s.`)
-
-  return { authToken: _cache.token }
+  console.log(`[anthropic-auth] JWT obtido, válido por ${expiresIn}s. Federation exchange fica a cargo do SDK.`)
 }
 
 /**
- * Verifica se alguma credencial Anthropic está configurada (API key OU Auth0 WIF).
- * Usado pelo model-registry para mostrar/ocultar o provider na UI.
- * Não faz nenhuma chamada de rede.
+ * Injeta o JWT como identity token de valor e remove a referência ao arquivo,
+ * garantindo que o SDK use o valor (o provider de arquivo tem precedência).
+ */
+function applyIdentityToken(jwt: string): void {
+  process.env.ANTHROPIC_IDENTITY_TOKEN = jwt
+  // Remove o caminho de arquivo (tmp/anthropic-token) para não cair no
+  // identityTokenFromFile, que tentaria ler um arquivo inexistente no Vercel.
+  if (process.env.ANTHROPIC_IDENTITY_TOKEN_FILE) {
+    delete process.env.ANTHROPIC_IDENTITY_TOKEN_FILE
+  }
+}
+
+/**
+ * Verifica se o Anthropic está configurado (API key OU Auth0 WIF).
+ * Usado pelo model-registry para o gating na UI. Sem chamadas de rede.
  */
 export function isAnthropicConfigured(): boolean {
   if (process.env.ANTHROPIC_API_KEY) return true

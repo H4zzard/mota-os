@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
-import { getAnthropicAuthOptions } from "@/lib/anthropic-auth"
+import { ensureAnthropicCredentials } from "@/lib/anthropic-auth"
 
 export type ClaudeModel =
   | "claude-opus-4-6"
@@ -36,13 +36,12 @@ const PRICING: Record<ClaudeModel, { in: number; out: number }> = {
 export class ClaudeClient {
   private defaultModel: ClaudeModel = "claude-sonnet-4-6"
 
-  // Cria o SDK com credenciais frescas a cada chamada.
-  // getAnthropicAuthOptions() retorna do cache em memória no hot path —
-  // chamada ao Auth0 só ocorre em cold start ou quando o token expira.
+  // Garante ANTHROPIC_IDENTITY_TOKEN setado (JWT do Auth0, cacheado em memória)
+  // e deixa o SDK fazer o federation exchange. Não passar authToken — seria
+  // Bearer direto e quebraria o WIF.
   private async getSDK(): Promise<Anthropic> {
-    const authOptions = await getAnthropicAuthOptions()
+    await ensureAnthropicCredentials()
     return new Anthropic({
-      ...authOptions,
       baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
       maxRetries: 2,
     })

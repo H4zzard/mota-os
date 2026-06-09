@@ -10,7 +10,7 @@ import { requestCodexResponse }   from "@/lib/codex-client"
 import { getValidGeminiToken }    from "@/lib/gemini-auth"
 import { getServiceAccountToken } from "@/lib/gemini-service-account"
 import { createGeminiClient, type GeminiContent, type GeminiModel } from "@/lib/api-connectors/gemini"
-import { getAnthropicAuthOptions } from "@/lib/anthropic-auth"
+import { ensureAnthropicCredentials } from "@/lib/anthropic-auth"
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -54,12 +54,13 @@ export type AIChunk = AIChunkDelta | AIChunkDone | AIChunkError
 
 // ─── Clientes (instanciados uma vez, reutilizados) ────────────────────────────
 
-// Cria um cliente Anthropic com credenciais dinâmicas (API key OU token Auth0 WIF).
-// Chamado a cada request — barato (sem HTTP no hot path graças ao cache em anthropic-auth.ts).
+// Cria um cliente Anthropic. Em vez de passar authToken (que seria Bearer direto
+// e quebraria o WIF), garantimos que ANTHROPIC_IDENTITY_TOKEN esteja setado e
+// deixamos o SDK fazer o federation exchange com as variáveis ANTHROPIC_FEDERATION_*.
+// ensureAnthropicCredentials usa cache em memória — sem HTTP no hot path.
 async function getAnthropicClient() {
-  const authOptions = await getAnthropicAuthOptions()
+  await ensureAnthropicCredentials()
   return new Anthropic({
-    ...authOptions,
     baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
     maxRetries: 2,
   })
