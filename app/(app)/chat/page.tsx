@@ -139,6 +139,7 @@ export default function ChatPage() {
       aiMode: AIMode = "jarvis",
       attachmentIds: string[] = [],
       pendingSourceIds: string[] = [],
+      notionPageIds: string[] = [],
     ) => {
       if (!text.trim() || isTyping) return;
 
@@ -198,6 +199,8 @@ export default function ChatPage() {
               attachmentIds.length > 0 ? attachmentIds : undefined,
             pending_source_ids:
               pendingSourceIds.length > 0 ? pendingSourceIds : undefined,
+            notion_page_ids:
+              notionPageIds.length > 0 ? notionPageIds : undefined,
           }),
           signal: abortRef.current.signal,
         });

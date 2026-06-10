@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
-  Paperclip, Database, Send, ChevronDown, Check, X, Loader2, FileText, Image,
+  Paperclip, Database, Send, ChevronDown, Check, X, Loader2, FileText, Image, Download,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AgentSelector } from "./AgentSelector"
@@ -32,7 +32,7 @@ interface KnowledgeSource {
 interface ChatInputProps {
   selectedAgent?:    AgentWithConfig | null
   onAgentChange:     (a: AgentWithConfig) => void
-  onSend:            (text: string, aiMode: AIMode, attachmentIds: string[], pendingSourceIds?: string[]) => void
+  onSend:            (text: string, aiMode: AIMode, attachmentIds: string[], pendingSourceIds?: string[], notionPageIds?: string[]) => void
   agents?:           AgentWithConfig[]
   disabled?:         boolean
   sessionId?:        string | null
@@ -141,18 +141,151 @@ function SourcesPopup({ sessionId, companyId, onSourcesChanged, pendingIds, onPe
   )
 }
 
+// ─── Notion icon (SVG) ───────────────────────────────────────────────────────
+
+function NotionIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.047.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.14c-.093-.514.28-.887.747-.933z" />
+    </svg>
+  )
+}
+
+// ─── Notion popup ─────────────────────────────────────────────────────────────
+
+interface NotionPageItem {
+  id:               string
+  title:            string
+  type:             "page" | "database"
+  icon:             string | null
+  last_edited_time: string
+}
+
+function NotionPopup({ companyId, selectedIds, onToggle, onSaveAsSource }: {
+  companyId?:       string
+  selectedIds:      Set<string>
+  onToggle:         (id: string, title: string) => void
+  onSaveAsSource:   (id: string, title: string) => Promise<void>
+}) {
+  const [pages, setPages]         = useState<NotionPageItem[]>([])
+  const [loading, setLoading]     = useState(true)
+  const [query, setQuery]         = useState("")
+  const [notConnected, setNotConnected] = useState(false)
+  const [savingId, setSavingId]   = useState<string | null>(null)
+  const [savedIds, setSavedIds]   = useState<Set<string>>(new Set())
+  const [error, setError]         = useState<string | null>(null)
+
+  const load = useCallback(async (q = "") => {
+    if (!companyId) { setLoading(false); return }
+    setLoading(true); setError(null)
+    const res = await fetch(`/api/notion/pages?company_id=${encodeURIComponent(companyId)}&q=${encodeURIComponent(q)}`)
+    if (res.status === 404) { setNotConnected(true); setLoading(false); return }
+    if (!res.ok) { setError("Erro ao carregar páginas do Notion."); setLoading(false); return }
+    const data = await res.json() as { pages: NotionPageItem[] }
+    setPages(data.pages ?? [])
+    setLoading(false)
+  }, [companyId])
+
+  useEffect(() => { void load() }, [load])
+
+  function handleSearch(e: React.ChangeEvent<HTMLInputElement>) {
+    setQuery(e.target.value)
+    void load(e.target.value)
+  }
+
+  async function handleSave(page: NotionPageItem) {
+    setSavingId(page.id)
+    await onSaveAsSource(page.id, page.title)
+    setSavedIds(prev => new Set([...prev, page.id]))
+    setSavingId(null)
+  }
+
+  if (notConnected) return (
+    <div className="px-3 py-4 text-center space-y-2">
+      <NotionIcon size={20} />
+      <p className="text-xs" style={{ color: "var(--text-primary)" }}>Notion não conectado</p>
+      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+        Conecte o Notion em Configurações → Integrações de API.
+      </p>
+    </div>
+  )
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-5 gap-2">
+      <Loader2 size={14} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+      <span className="text-xs" style={{ color: "var(--text-muted)" }}>Carregando...</span>
+    </div>
+  )
+
+  if (error) return (
+    <p className="text-xs px-3 py-4 text-center" style={{ color: "#ef4444" }}>{error}</p>
+  )
+
+  return (
+    <div>
+      <div className="px-3 pb-2">
+        <input
+          type="text" value={query} onChange={handleSearch}
+          placeholder="Buscar páginas..." autoFocus
+          className="w-full text-xs px-2.5 py-1.5 rounded-lg border outline-none"
+          style={{ background: "var(--bg-input)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+        />
+      </div>
+      <div className="max-h-64 overflow-y-auto p-1">
+        {pages.length === 0 ? (
+          <p className="text-xs px-3 py-3 text-center" style={{ color: "var(--text-muted)" }}>
+            Nenhuma página encontrada.
+          </p>
+        ) : pages.map((p) => {
+          const isSelected = selectedIds.has(p.id)
+          const isSaved    = savedIds.has(p.id)
+          return (
+            <div key={p.id} className="flex items-center gap-1 px-1 py-0.5 rounded-lg hover:bg-[var(--bg-hover)]">
+              <button
+                onClick={() => onToggle(p.id, p.title)}
+                className="flex-1 flex items-center gap-2 text-left py-1.5 px-1.5">
+                <div className={cn(
+                  "w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all",
+                  isSelected ? "bg-mota-600 border-mota-600" : "border-[var(--border-color)]"
+                )}>
+                  {isSelected && <Check size={10} className="text-white" />}
+                </div>
+                <span className="text-[11px] shrink-0">{p.icon ?? (p.type === "database" ? "🗄️" : "📄")}</span>
+                <p className="text-xs truncate flex-1" style={{ color: "var(--text-primary)" }}>{p.title}</p>
+              </button>
+              <button
+                onClick={() => void handleSave(p)}
+                disabled={savingId === p.id || isSaved}
+                title={isSaved ? "Salvo como fonte" : "Salvar como fonte de conhecimento"}
+                className="w-6 h-6 flex items-center justify-center rounded shrink-0 transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                style={{ color: isSaved ? "#22c55e" : "var(--text-muted)" }}>
+                {savingId === p.id
+                  ? <Loader2 size={11} className="animate-spin" />
+                  : isSaved ? <Check size={11} /> : <Download size={11} />}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── ChatInput ────────────────────────────────────────────────────────────────
 
 export function ChatInput({
   selectedAgent, onAgentChange, onSend, agents, disabled,
   sessionId, companyId, onSourcesChanged,
 }: ChatInputProps) {
-  const [value, setValue]                       = useState("")
-  const [aiMode, setAiMode]                     = useState<AIMode>("jarvis")
-  const [aiModeOpen, setAiModeOpen]             = useState(false)
-  const [sourcesOpen, setSourcesOpen]           = useState(false)
-  const [pendingSourceIds, setPendingSourceIds] = useState<string[]>([])
-  const [slashAgents, setSlashAgents]           = useState<SlashAgentPublic[]>([])
+  const [value, setValue]                         = useState("")
+  const [aiMode, setAiMode]                       = useState<AIMode>("jarvis")
+  const [aiModeOpen, setAiModeOpen]               = useState(false)
+  const [sourcesOpen, setSourcesOpen]             = useState(false)
+  const [notionOpen, setNotionOpen]               = useState(false)
+  const [pendingSourceIds, setPendingSourceIds]   = useState<string[]>([])
+  const [notionPageIds, setNotionPageIds]         = useState<Map<string, string>>(new Map()) // id → title
+  const [notionActionMsg, setNotionActionMsg]     = useState<string | null>(null)
+  const [slashAgents, setSlashAgents]             = useState<SlashAgentPublic[]>([])
   const [highlightIdx, setHighlightIdx]         = useState(0)
   const [attachments, setAttachments]           = useState<PendingAttachment[]>([])
   const [uploadErr, setUploadErr]               = useState<string | null>(null)
@@ -168,6 +301,31 @@ export function ChatInput({
     setPendingSourceIds((prev) =>
       linked ? [...prev, id] : prev.filter((x) => x !== id)
     )
+  }
+
+  function handleNotionToggle(id: string, title: string) {
+    setNotionPageIds((prev) => {
+      const next = new Map(prev)
+      if (next.has(id)) next.delete(id)
+      else next.set(id, title)
+      return next
+    })
+  }
+
+  async function handleNotionSaveAsSource(id: string, title: string) {
+    if (!companyId) return
+    try {
+      const res = await fetch(`/api/notion/page/${id}?company_id=${encodeURIComponent(companyId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ company_id: companyId }),
+      })
+      if (res.ok) {
+        setNotionActionMsg(`"${title}" salvo como fonte de conhecimento.`)
+        onSourcesChanged?.()
+        setTimeout(() => setNotionActionMsg(null), 3000)
+      }
+    } catch { /* silent */ }
   }
 
   // Carrega slash agents na montagem
@@ -297,11 +455,13 @@ export function ChatInput({
     if (attachments.some(a => a.uploading)) { setUploadErr("Aguarde os uploads terminarem."); return }
     if (attachments.some(a => a.error))     { setUploadErr("Remova os arquivos com erro antes de enviar."); return }
 
-    const uploadedIds = attachments.filter(a => a.uploadedId).map(a => a.uploadedId!)
+    const uploadedIds    = attachments.filter(a => a.uploadedId).map(a => a.uploadedId!)
     const currentPending = pendingSourceIds
-    onSend(trimmed, aiMode, uploadedIds, currentPending.length > 0 ? currentPending : undefined)
+    const currentNotion  = notionPageIds
+    onSend(trimmed, aiMode, uploadedIds, currentPending.length > 0 ? currentPending : undefined, currentNotion.size > 0 ? [...currentNotion.keys()] : undefined)
     setValue("")
     setAttachments([])
+    setNotionPageIds(new Map())
     setUploadErr(null)
     setHighlightIdx(0)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
@@ -374,6 +534,24 @@ export function ChatInput({
                   <X size={10} />
                 </button>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Páginas Notion selecionadas ────────────────────────────────────── */}
+      {notionPageIds.size > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {[...notionPageIds.entries()].map(([id, title]) => (
+            <div key={id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px]"
+              style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
+              <NotionIcon size={11} />
+              <span className="truncate max-w-[140px]" style={{ color: "var(--text-primary)" }}>{title}</span>
+              <button onClick={() => handleNotionToggle(id, title)}
+                className="shrink-0 hover:text-red-400 transition-colors"
+                style={{ color: "var(--text-muted)" }}>
+                <X size={10} />
+              </button>
             </div>
           ))}
         </div>
@@ -464,6 +642,66 @@ export function ChatInput({
               </AnimatePresence>
             </div>
           </div>
+
+            {/* Notion */}
+            <div className="relative">
+              <button onClick={() => { setNotionOpen((v) => !v); setSourcesOpen(false) }}
+                className={cn("w-7 h-7 flex items-center justify-center rounded-lg transition-colors",
+                  notionOpen ? "bg-[#00000015] text-black dark:bg-white/10 dark:text-white" : "hover:bg-[var(--bg-hover)]")}
+                style={{ color: notionOpen ? undefined : notionPageIds.size > 0 ? "var(--text-primary)" : "var(--text-muted)" }}
+                title="Selecionar páginas do Notion">
+                <NotionIcon size={14} />
+                {notionPageIds.size > 0 && (
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[8px] font-bold flex items-center justify-center text-white"
+                    style={{ background: "var(--text-primary)" }}>
+                    {notionPageIds.size}
+                  </span>
+                )}
+              </button>
+              <AnimatePresence>
+                {notionOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setNotionOpen(false)} />
+                    <motion.div initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 6, scale: 0.97 }} transition={{ duration: 0.12 }}
+                      className="absolute bottom-full left-0 mb-2 w-80 rounded-xl border shadow-xl z-40 overflow-hidden"
+                      style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
+                      <div className="flex items-center justify-between px-3 py-2.5 border-b"
+                        style={{ borderColor: "var(--border-color)" }}>
+                        <div className="flex items-center gap-2">
+                          <NotionIcon size={13} />
+                          <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+                            Notion
+                          </span>
+                          {notionPageIds.size > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                              style={{ background: "rgba(0,0,0,0.06)", color: "var(--text-secondary)" }}>
+                              {notionPageIds.size} selecionada{notionPageIds.size > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                        <button onClick={() => setNotionOpen(false)}
+                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]"
+                          style={{ color: "var(--text-muted)" }}>
+                          <X size={12} />
+                        </button>
+                      </div>
+                      {notionActionMsg && (
+                        <div className="px-3 py-2 text-[11px]" style={{ color: "#16a34a", background: "rgba(22,163,74,0.06)" }}>
+                          {notionActionMsg}
+                        </div>
+                      )}
+                      <NotionPopup
+                        companyId={companyId}
+                        selectedIds={new Set(notionPageIds.keys())}
+                        onToggle={handleNotionToggle}
+                        onSaveAsSource={handleNotionSaveAsSource}
+                      />
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
 
           <div className="flex-1" />
 

@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
     selected_ai_mode?:   string
     attachment_ids?:     string[]
     pending_source_ids?: string[]
+    notion_page_ids?:    string[]
   }
 
   // ─── Sanitização: só aceitar roles válidos no histórico ──────────────────
@@ -415,6 +416,32 @@ export async function POST(req: NextRequest) {
       }
     } catch (ctxErr) {
       console.warn("[chat] Erro ao buscar contexto de conhecimento:", ctxErr)
+    }
+  }
+
+  // ─── Contexto Notion (páginas selecionadas no popup) ─────────────────────
+  if (body.notion_page_ids && body.notion_page_ids.length > 0) {
+    try {
+      const { getNotionClientForCompany, fetchPageContent } = await import("@/lib/notion")
+      const notion = await getNotionClientForCompany(resolvedCompany)
+      if (notion) {
+        const parts: string[] = []
+        for (const pageId of body.notion_page_ids.slice(0, 5)) {
+          try {
+            const { title, content } = await fetchPageContent(notion, pageId)
+            parts.push(`=== Notion: ${title} ===\n${content.slice(0, 8_000)}`)
+          } catch { /* ignora páginas inacessíveis */ }
+        }
+        if (parts.length > 0) {
+          system = (system ?? "") + `\n\nCONTEXTO DO NOTION:\n${parts.join("\n\n")}\n`
+          void logActivity({
+            userId: user.id, eventType: "source", action: "chat_notion_injected",
+            detail: `${parts.length} página(s)`, sessionId: sid as string, companyId: resolvedCompany,
+          })
+        }
+      }
+    } catch (notionErr) {
+      console.warn("[chat] Notion context failed:", notionErr)
     }
   }
 
