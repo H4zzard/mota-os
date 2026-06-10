@@ -6,7 +6,8 @@ import { ArrowLeft, Bot, Save, AlertCircle, FileText, X, Loader2 } from "lucide-
 import { useCompany } from "@/components/providers/CompanyProvider"
 import { cn } from "@/lib/utils"
 
-const ALLOWED_EXTS = [".md", ".txt", ".csv", ".json"]
+const ALLOWED_EXTS = [".md", ".txt", ".csv", ".json", ".html", ".htm", ".pdf"]
+const ACCEPT_ATTR  = ALLOWED_EXTS.join(",")
 
 const inputCls = [
   "w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors",
@@ -279,9 +280,9 @@ export default function NewAgentPage() {
                 Clique para adicionar arquivos
               </p>
               <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-                .md, .txt, .csv, .json · máx 20 MB cada
+                .md, .txt, .csv, .json, .html, .pdf · máx 20 MB cada
               </p>
-              <input type="file" accept=".md,.txt,.csv,.json" multiple className="hidden"
+              <input type="file" accept={ACCEPT_ATTR} multiple className="hidden"
                 onChange={addMemFiles} disabled={saving} />
             </label>
 

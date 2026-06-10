@@ -543,14 +543,14 @@ function UploadModal({ companyId, onClose, onUploaded }: {
                 {file ? file.name : "Clique para selecionar"}
               </p>
               <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                TXT, MD, CSV, JSON, PDF · Máximo 10 MB
+                TXT, MD, CSV, JSON, HTML, PDF · Máximo 10 MB
               </p>
             </div>
           </button>
           <input
             id="upload-file-input"
             type="file"
-            accept=".txt,.md,.csv,.json,.pdf,text/plain,text/markdown,text/csv,application/json,application/pdf"
+            accept=".txt,.md,.csv,.json,.html,.htm,.pdf,text/plain,text/markdown,text/csv,application/json,application/pdf,text/html"
             className="hidden"
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError("") }}
           />

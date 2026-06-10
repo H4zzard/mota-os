@@ -3,14 +3,15 @@ import { createAdminClient } from '@/lib/supabase-admin'
 import { isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
 import { mapAgentFile, type ApiAgentFile } from '@/lib/agent-helpers'
+import { extractFileText, fileExtension, SUPPORTED_EXTENSIONS } from '@/lib/extract-text'
 
 export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ id: string }> }
 
-const ALLOWED_EXTENSIONS = ['.md', '.txt', '.csv', '.json']
+const ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS as readonly string[]
 const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
-const MAX_EXTRACTED_TEXT = 100_000
+const MAX_EXTRACTED_TEXT = 200_000
 
 export async function POST(request: Request, { params }: Ctx) {
   const supabase = await createClient()
@@ -53,9 +54,7 @@ export async function POST(request: Request, { params }: Ctx) {
     )
   }
 
-  const dotIndex = file.name.lastIndexOf('.')
-  const extension =
-    dotIndex !== -1 ? file.name.slice(dotIndex).toLowerCase() : ''
+  const extension = fileExtension(file.name)
 
   if (!ALLOWED_EXTENSIONS.includes(extension)) {
     return Response.json(
@@ -95,23 +94,8 @@ export async function POST(request: Request, { params }: Ctx) {
     )
   }
 
-  // Extract text content
-  let extracted_text: string | null = null
-  if (ALLOWED_EXTENSIONS.includes(extension)) {
-    const rawText = await file.text()
-    if (extension === '.json') {
-      try {
-        extracted_text = JSON.stringify(JSON.parse(rawText), null, 2)
-      } catch {
-        extracted_text = rawText
-      }
-    } else {
-      extracted_text = rawText
-    }
-    if (extracted_text && extracted_text.length > MAX_EXTRACTED_TEXT) {
-      extracted_text = extracted_text.slice(0, MAX_EXTRACTED_TEXT)
-    }
-  }
+  // Extrai texto (txt, md, csv, json, html, pdf)
+  const { text: extracted_text } = await extractFileText(file, extension, MAX_EXTRACTED_TEXT)
 
   const { data, error: dbError } = await adminClient
     .from('agent_files')

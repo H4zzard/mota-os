@@ -456,9 +456,9 @@ function TabArquivos({ agentId, files, onUploaded, onDeleted, onFileUpdated }: {
           {uploading ? "Enviando..." : "Clique ou arraste um arquivo"}
         </p>
         <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-          .md, .txt, .csv, .json · máx 20 MB
+          .md, .txt, .csv, .json, .html, .pdf · máx 20 MB
         </p>
-        <input type="file" accept=".md,.txt,.csv,.json" className="hidden" onChange={handleUpload} />
+        <input type="file" accept=".md,.txt,.csv,.json,.html,.htm,.pdf" className="hidden" onChange={handleUpload} />
       </label>
 
       {/* File list */}

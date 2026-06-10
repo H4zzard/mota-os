@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, ALL_SLUGS } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
 import { apiError, dbError as handleDbError } from "@/lib/api-error"
+import { extractFileText, fileExtension } from "@/lib/extract-text"
 
 export const dynamic = "force-dynamic"
 
@@ -14,10 +15,12 @@ const ACCEPTED_TYPES: Record<string, string> = {
   "application/json":          "json",
   "application/pdf":           "pdf",
   "text/x-markdown":           "md",
+  "text/html":                 "html",
+  "application/xhtml+xml":     "html",
 }
 
 const MAX_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
-const TEXT_LIMIT     = 100_000          // Limita texto extraído a 100k chars
+const TEXT_LIMIT     = 200_000          // Limita texto extraído a 200k chars
 
 // Magic bytes para verificação de MIME real (evita spoofing de Content-Type)
 // Compara os primeiros bytes do arquivo contra assinaturas conhecidas.
@@ -41,30 +44,6 @@ function detectMime(bytes: Uint8Array): string | null {
 function isBinaryMime(mime: string | null): boolean {
   if (!mime) return false
   return mime === "application/zip" || mime === "application/octet-stream"
-}
-
-async function extractText(file: File): Promise<{ text: string | null; warning: string | null }> {
-  const mime = file.type.split(";")[0].trim()
-
-  if (mime === "application/pdf") {
-    return { text: null, warning: "PDF: extração de texto não disponível. Arquivo salvo sem texto indexado." }
-  }
-
-  try {
-    const raw = await file.text()
-    if (mime === "application/json") {
-      try {
-        const parsed = JSON.parse(raw)
-        const text   = JSON.stringify(parsed, null, 2).slice(0, TEXT_LIMIT)
-        return { text, warning: null }
-      } catch {
-        return { text: raw.slice(0, TEXT_LIMIT), warning: null }
-      }
-    }
-    return { text: raw.slice(0, TEXT_LIMIT), warning: null }
-  } catch {
-    return { text: null, warning: "Não foi possível extrair texto do arquivo." }
-  }
 }
 
 export async function POST(req: NextRequest) {
@@ -96,7 +75,7 @@ export async function POST(req: NextRequest) {
   const mime = file.type.split(";")[0].trim()
   if (!ACCEPTED_TYPES[mime]) {
     return NextResponse.json({
-      error: `Tipo de arquivo não suportado: ${mime}. Aceitos: txt, md, csv, json, pdf`,
+      error: `Tipo de arquivo não suportado: ${mime}. Aceitos: txt, md, csv, json, html, pdf`,
     }, { status: 415 })
   }
   if (file.size > MAX_SIZE_BYTES) {
@@ -130,8 +109,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Sem acesso a esta empresa" }, { status: 403 })
   }
 
-  // ─── Extrair texto ────────────────────────────────────────────────────────────
-  const { text: extractedText, warning } = await extractText(file)
+  // ─── Extrair texto (txt, md, csv, json, html, pdf) ────────────────────────────
+  const extDot = fileExtension(file.name) || `.${ACCEPTED_TYPES[mime]}`
+  const { text: extractedText, warning } = await extractFileText(file, extDot, TEXT_LIMIT)
 
   // ─── Upload para Supabase Storage ─────────────────────────────────────────────
   const admin       = createAdminClient()
