@@ -115,15 +115,24 @@ export async function fetchPageContent(
   notion: Client,
   pageId: string,
 ): Promise<{ title: string; content: string }> {
-  const page = await notion.pages.retrieve({ page_id: pageId })
-  const props = (page as { properties?: Record<string, unknown> }).properties
-
   let title = "Sem título"
-  if (props) {
-    const titleProp = Object.values(props).find(
-      p => (p as { type?: string }).type === "title",
-    ) as { title?: unknown } | undefined
-    if (titleProp?.title) title = extractRichText(titleProp.title) || "Sem título"
+
+  // Tenta como página; se falhar, tenta como database (ambos têm blocos filhos)
+  try {
+    const page = await notion.pages.retrieve({ page_id: pageId })
+    const props = (page as { properties?: Record<string, unknown> }).properties
+    if (props) {
+      const titleProp = Object.values(props).find(
+        p => (p as { type?: string }).type === "title",
+      ) as { title?: unknown } | undefined
+      if (titleProp?.title) title = extractRichText(titleProp.title) || "Sem título"
+    }
+  } catch {
+    try {
+      const db = await notion.databases.retrieve({ database_id: pageId })
+      const dbTitle = (db as { title?: unknown }).title
+      if (dbTitle) title = extractRichText(dbTitle) || "Sem título"
+    } catch { /* usa "Sem título" */ }
   }
 
   const lines: string[] = []

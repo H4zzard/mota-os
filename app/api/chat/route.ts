@@ -429,8 +429,12 @@ export async function POST(req: NextRequest) {
         for (const pageId of body.notion_page_ids.slice(0, 5)) {
           try {
             const { title, content } = await fetchPageContent(notion, pageId)
-            parts.push(`=== Notion: ${title} ===\n${content.slice(0, 8_000)}`)
-          } catch { /* ignora páginas inacessíveis */ }
+            if (content.trim()) {
+              parts.push(`=== Notion: ${title} ===\n${content.slice(0, 8_000)}`)
+            }
+          } catch (pageErr) {
+            console.warn("[chat] Notion page fetch failed:", pageId, pageErr)
+          }
         }
         if (parts.length > 0) {
           system = (system ?? "") + `\n\nCONTEXTO DO NOTION:\n${parts.join("\n\n")}\n`

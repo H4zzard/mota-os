@@ -165,15 +165,18 @@ function NotionPopup({ companyId, selectedIds, onToggle, onSaveAsSource }: {
   companyId?:       string
   selectedIds:      Set<string>
   onToggle:         (id: string, title: string) => void
-  onSaveAsSource:   (id: string, title: string) => Promise<void>
+  onSaveAsSource:   (id: string, title: string) => Promise<boolean>
 }) {
-  const [pages, setPages]         = useState<NotionPageItem[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [query, setQuery]         = useState("")
+  const [pages, setPages]               = useState<NotionPageItem[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [searching, setSearching]       = useState(false)
+  const [query, setQuery]               = useState("")
   const [notConnected, setNotConnected] = useState(false)
-  const [savingId, setSavingId]   = useState<string | null>(null)
-  const [savedIds, setSavedIds]   = useState<Set<string>>(new Set())
-  const [error, setError]         = useState<string | null>(null)
+  const [savingId, setSavingId]         = useState<string | null>(null)
+  const [savedIds, setSavedIds]         = useState<Set<string>>(new Set())
+  const [saveError, setSaveError]       = useState<string | null>(null)
+  const [error, setError]               = useState<string | null>(null)
+  const debounceRef                     = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async (q = "") => {
     if (!companyId) { setLoading(false); return }
@@ -189,14 +192,26 @@ function NotionPopup({ companyId, selectedIds, onToggle, onSaveAsSource }: {
   useEffect(() => { void load() }, [load])
 
   function handleSearch(e: React.ChangeEvent<HTMLInputElement>) {
-    setQuery(e.target.value)
-    void load(e.target.value)
+    const v = e.target.value
+    setQuery(v)
+    setSearching(true)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setSearching(false)
+      void load(v)
+    }, 3000)
   }
 
   async function handleSave(page: NotionPageItem) {
     setSavingId(page.id)
-    await onSaveAsSource(page.id, page.title)
-    setSavedIds(prev => new Set([...prev, page.id]))
+    setSaveError(null)
+    const ok = await onSaveAsSource(page.id, page.title)
+    if (ok) {
+      setSavedIds(prev => new Set([...prev, page.id]))
+    } else {
+      setSaveError(`Erro ao salvar "${page.title}". Verifique a conexão e tente novamente.`)
+      setTimeout(() => setSaveError(null), 4000)
+    }
     setSavingId(null)
   }
 
@@ -224,12 +239,26 @@ function NotionPopup({ companyId, selectedIds, onToggle, onSaveAsSource }: {
   return (
     <div>
       <div className="px-3 pb-2">
-        <input
-          type="text" value={query} onChange={handleSearch}
-          placeholder="Buscar páginas..." autoFocus
-          className="w-full text-xs px-2.5 py-1.5 rounded-lg border outline-none"
-          style={{ background: "var(--bg-input)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
-        />
+        <div className="relative">
+          <input
+            type="text" value={query} onChange={handleSearch}
+            placeholder="Buscar páginas..." autoFocus
+            className="w-full text-xs px-2.5 py-1.5 rounded-lg border outline-none pr-7"
+            style={{ background: "var(--bg-input)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+          />
+          {searching && (
+            <Loader2 size={11} className="animate-spin absolute right-2 top-1/2 -translate-y-1/2"
+              style={{ color: "var(--text-muted)" }} />
+          )}
+        </div>
+        {searching && (
+          <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+            Aguardando 3s para buscar...
+          </p>
+        )}
+        {saveError && (
+          <p className="text-[10px] mt-1" style={{ color: "#ef4444" }}>{saveError}</p>
+        )}
       </div>
       <div className="max-h-64 overflow-y-auto p-1">
         {pages.length === 0 ? (
@@ -312,8 +341,8 @@ export function ChatInput({
     })
   }
 
-  async function handleNotionSaveAsSource(id: string, title: string) {
-    if (!companyId) return
+  async function handleNotionSaveAsSource(id: string, title: string): Promise<boolean> {
+    if (!companyId) return false
     try {
       const res = await fetch(`/api/notion/page/${id}?company_id=${encodeURIComponent(companyId)}`, {
         method: "POST",
@@ -324,8 +353,12 @@ export function ChatInput({
         setNotionActionMsg(`"${title}" salvo como fonte de conhecimento.`)
         onSourcesChanged?.()
         setTimeout(() => setNotionActionMsg(null), 3000)
+        return true
       }
-    } catch { /* silent */ }
+      return false
+    } catch {
+      return false
+    }
   }
 
   // Carrega slash agents na montagem
