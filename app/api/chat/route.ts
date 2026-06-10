@@ -334,26 +334,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 4. Injeção de conteúdo COMPLETO para fontes explicitamente selecionadas
+      // 4+5. Injeção de conteúdo COMPLETO para fontes explicitamente selecionadas
       // Fontes selecionadas pelo usuário SEMPRE têm todo o conteúdo injetado —
       // sem depender de busca semântica, sem truncar por similaridade.
       if (sources.length > 0) {
-        const TOTAL_CHAR_LIMIT    = 120_000  // limite total generoso
-        const PER_SOURCE_LIMIT    = 60_000   // por fonte
+        const TOTAL_CHAR_LIMIT = 120_000   // limite total
+        const PER_SOURCE_LIMIT =  60_000   // por fonte
         const contentParts: string[] = []
         let totalChars = 0
         const sourcesWithoutContent: SourceRow[] = []
 
+        // Passo A: fontes com conteúdo direto (coluna content ou source_files)
         for (const src of sources) {
-          // Resolve o texto: coluna content direto ou extracted_text dos arquivos
-          const fileText = src.source_files
-            ?.map(f => f.extracted_text ?? "")
+          const fileText = (src.source_files ?? [])
+            .map(f => f.extracted_text ?? "")
             .filter(Boolean)
-            .join("\n\n") ?? ""
-          const text = (src.content?.trim() || fileText.trim())
+            .join("\n\n")
+          const text = src.content?.trim() || fileText.trim()
 
           if (!text) {
-            // Sem texto direto — vai tentar via RAG abaixo
             if (src.embedding_status === "done") sourcesWithoutContent.push(src)
             continue
           }
@@ -365,38 +364,47 @@ export async function POST(req: NextRequest) {
           totalChars += excerpt.length
         }
 
+        // Passo B: fontes sem conteúdo direto → reconstrói via chunks em ordem
+        if (sourcesWithoutContent.length > 0) {
+          try {
+            const { data: allChunks } = await admin
+              .from("knowledge_chunks")
+              .select("content, chunk_index, knowledge_source_id")
+              .in("knowledge_source_id", sourcesWithoutContent.map(s => s.id))
+              .is("deleted_at", null)
+              .order("knowledge_source_id")
+              .order("chunk_index")
+
+            if (allChunks && allChunks.length > 0) {
+              type Chunk = { content: string; chunk_index: number; knowledge_source_id: string }
+              const bySource = new Map<string, string[]>()
+              for (const c of allChunks as Chunk[]) {
+                const arr = bySource.get(c.knowledge_source_id) ?? []
+                arr.push(c.content)
+                bySource.set(c.knowledge_source_id, arr)
+              }
+
+              const nameMap = new Map(sourcesWithoutContent.map(s => [s.id, `${s.name} (${s.type})`]))
+              for (const [srcId, chunks] of bySource) {
+                const remaining = TOTAL_CHAR_LIMIT - totalChars
+                if (remaining <= 0) break
+                const text = chunks.join("\n").slice(0, Math.min(remaining, PER_SOURCE_LIMIT))
+                contentParts.push(`=== ${nameMap.get(srcId) ?? srcId} ===\n${text}`)
+                totalChars += text.length
+              }
+            }
+          } catch (chunkErr) {
+            console.warn("[chat] Fetch de chunks falhou:", chunkErr)
+          }
+        }
+
+        // Injeção única de todo o conteúdo coletado
         if (contentParts.length > 0) {
           system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS (conteúdo completo):\n${contentParts.join("\n\n")}\n`
           void logActivity({
-            userId: user.id, eventType: "source", action: "chat_fulltext_injected",
+            userId: user.id, eventType: "source", action: "chat_content_injected",
             detail: `${contentParts.length} fonte(s) — ${totalChars} chars`, sessionId: sid as string, companyId: resolvedCompany,
           })
-        }
-
-        // 5. Para fontes selecionadas sem texto direto (apenas embeddings), usa RAG
-        if (sourcesWithoutContent.length > 0) {
-          try {
-            if (!queryEmbedding) queryEmbedding = await embedText(body.user_message.slice(0, 2000))
-            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
-              query_embedding:   `[${queryEmbedding!.join(",")}]`,
-              match_count:       12,
-              filter_company:    resolvedCompany,
-              filter_agent_id:   null,
-              filter_source_ids: sourcesWithoutContent.map(s => s.id),
-              min_similarity:    0.2,
-            })
-            if (chunks && chunks.length > 0) {
-              const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
-                .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
-              system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO (semântico — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
-              void logActivity({
-                userId: user.id, eventType: "source", action: "chat_rag_injected",
-                detail: `${parts.length} trecho(s) semântico(s)`, sessionId: sid as string, companyId: resolvedCompany,
-              })
-            }
-          } catch (ragErr) {
-            console.warn("[chat] RAG para fontes sem texto direto falhou:", ragErr)
-          }
         }
       }
 
