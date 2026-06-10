@@ -52,84 +52,100 @@ export function extractRichText(richText: unknown): string {
   return (richText as RichTextItem[]).map(t => t.plain_text ?? "").join("")
 }
 
-// ─── Property extractor (para linhas de database) ─────────────────────────────
+// ─── Property extractor (para páginas e linhas de database) ───────────────────
 
-type PropValue = {
-  type?: string
-  title?:        unknown[]
-  rich_text?:    unknown[]
-  select?:       { name: string } | null
-  multi_select?: { name: string }[]
-  url?:          string | null
-  email?:        string | null
-  phone_number?: string | null
-  number?:       number | null
-  checkbox?:     boolean
-  date?:         { start: string; end?: string | null } | null
-  formula?:      { type: string; string?: string | null; number?: number | null; boolean?: boolean | null }
-  status?:       { name: string } | null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PropValue = Record<string, any> & { type?: string }
+
+/** Converte UMA propriedade do Notion em string legível. Retorna null se vazia. */
+function propValueToString(prop: PropValue): string | null {
+  switch (prop.type) {
+    case "title":
+      return extractRichText(prop.title) || null
+    case "rich_text":
+      return extractRichText(prop.rich_text) || null
+    case "select":
+      return prop.select?.name ?? null
+    case "status":
+      return prop.status?.name ?? null
+    case "multi_select":
+      return prop.multi_select?.length
+        ? prop.multi_select.map((s: { name: string }) => s.name).join(", ")
+        : null
+    case "people":
+      return prop.people?.length
+        ? prop.people.map((u: { name?: string }) => u.name ?? "—").join(", ")
+        : null
+    case "url":
+      return prop.url || null
+    case "email":
+      return prop.email || null
+    case "phone_number":
+      return prop.phone_number || null
+    case "number":
+      return prop.number !== null && prop.number !== undefined ? String(prop.number) : null
+    case "checkbox":
+      return prop.checkbox ? "Sim" : "Não"
+    case "date":
+      if (!prop.date) return null
+      return prop.date.end ? `${prop.date.start} → ${prop.date.end}` : prop.date.start
+    case "created_time":
+      return prop.created_time ?? null
+    case "last_edited_time":
+      return prop.last_edited_time ?? null
+    case "unique_id":
+      if (!prop.unique_id) return null
+      return prop.unique_id.prefix
+        ? `${prop.unique_id.prefix}-${prop.unique_id.number}`
+        : String(prop.unique_id.number)
+    case "files":
+      return prop.files?.length
+        ? prop.files
+            .map((f: { name?: string; external?: { url: string }; file?: { url: string } }) =>
+              f.external?.url ?? f.file?.url ?? f.name ?? "",
+            )
+            .filter(Boolean)
+            .join(", ") || null
+        : null
+    case "relation":
+      return prop.relation?.length ? `${prop.relation.length} relacionado(s)` : null
+    case "formula": {
+      const f = prop.formula
+      if (!f) return null
+      if (f.string) return f.string
+      if (f.number !== null && f.number !== undefined) return String(f.number)
+      if (f.boolean !== null && f.boolean !== undefined) return f.boolean ? "Sim" : "Não"
+      if (f.date) return f.date.start ?? null
+      return null
+    }
+    case "rollup": {
+      const r = prop.rollup
+      if (!r) return null
+      if (r.type === "number" && r.number !== null && r.number !== undefined) return String(r.number)
+      if (r.type === "array" && Array.isArray(r.array))
+        return r.array.map((item: PropValue) => propValueToString(item)).filter(Boolean).join(", ") || null
+      return null
+    }
+    default:
+      return null
+  }
 }
 
-function extractProperties(properties: Record<string, PropValue>): string[] {
-  const rows: string[] = []
-  let rowTitle = ""
+/** Extrai título + todas as demais propriedades de um objeto de propriedades. */
+function extractPageProperties(properties: Record<string, PropValue>): { title: string; lines: string[] } {
+  let title = ""
+  const lines: string[] = []
 
   for (const [name, prop] of Object.entries(properties)) {
-    switch (prop.type) {
-      case "title": {
-        const t = extractRichText(prop.title)
-        if (t) rowTitle = t
-        break
-      }
-      case "rich_text": {
-        const t = extractRichText(prop.rich_text)
-        if (t) rows.push(`${name}: ${t}`)
-        break
-      }
-      case "select":
-        if (prop.select) rows.push(`${name}: ${prop.select.name}`)
-        break
-      case "status":
-        if (prop.status) rows.push(`${name}: ${prop.status.name}`)
-        break
-      case "multi_select":
-        if (prop.multi_select?.length)
-          rows.push(`${name}: ${prop.multi_select.map(s => s.name).join(", ")}`)
-        break
-      case "url":
-        if (prop.url) rows.push(`${name}: ${prop.url}`)
-        break
-      case "email":
-        if (prop.email) rows.push(`${name}: ${prop.email}`)
-        break
-      case "phone_number":
-        if (prop.phone_number) rows.push(`${name}: ${prop.phone_number}`)
-        break
-      case "number":
-        if (prop.number !== null && prop.number !== undefined) rows.push(`${name}: ${prop.number}`)
-        break
-      case "checkbox":
-        rows.push(`${name}: ${prop.checkbox ? "Sim" : "Não"}`)
-        break
-      case "date":
-        if (prop.date) {
-          const range = prop.date.end
-            ? `${prop.date.start} → ${prop.date.end}`
-            : prop.date.start
-          rows.push(`${name}: ${range}`)
-        }
-        break
-      case "formula": {
-        const f = prop.formula
-        if (f?.string) rows.push(`${name}: ${f.string}`)
-        else if (f?.number !== null && f?.number !== undefined) rows.push(`${name}: ${f.number}`)
-        break
-      }
+    if (prop?.type === "title") {
+      title = extractRichText(prop.title)
+      continue
     }
+    const val = propValueToString(prop)
+    if (val) lines.push(`${name}: ${val}`)
   }
 
-  // Título sempre primeiro
-  return rowTitle ? [rowTitle, ...rows] : rows
+  return { title, lines }
 }
 
 // ─── Block → texto (blocos simples de página) ─────────────────────────────────
@@ -195,65 +211,79 @@ export async function fetchPageContent(
   pageId: string,
 ): Promise<{ title: string; content: string }> {
   let title = "Sem título"
+  const lines: string[] = []
+  let isPage = false
 
-  // Determina o título: tenta como página, depois como database
+  // ── 1. Tenta como PÁGINA: extrai título + TODAS as propriedades ──
   try {
     const page = await notion.pages.retrieve({ page_id: pageId })
-    const props = (page as { properties?: Record<string, unknown> }).properties
+    isPage = true
+    const props = (page as { properties?: Record<string, PropValue> }).properties
     if (props) {
-      const tp = Object.values(props).find(
-        p => (p as { type?: string }).type === "title",
-      ) as { title?: unknown } | undefined
-      if (tp?.title) title = extractRichText(tp.title) || "Sem título"
+      const { title: pgTitle, lines: propLines } = extractPageProperties(props)
+      if (pgTitle) title = pgTitle
+      // Propriedades da página (caso de linha de database: aqui estão TODOS os dados)
+      for (const l of propLines) lines.push(l)
     }
   } catch {
+    // ── 2. Não é página: tenta como DATABASE ──
     try {
       const db = await notion.databases.retrieve({ database_id: pageId })
       title = extractRichText((db as { title?: unknown }).title) || "Sem título"
     } catch { /* usa "Sem título" */ }
   }
 
-  const lines: string[] = []
+  // Resolve os data_source_ids de um database (SDK v5 — query exige data_source_id)
+  async function getDataSourceIds(databaseId: string): Promise<string[]> {
+    try {
+      const db = await notion.databases.retrieve({ database_id: databaseId })
+      const ds = (db as { data_sources?: { id: string }[] }).data_sources
+      if (Array.isArray(ds) && ds.length > 0) return ds.map(d => d.id)
+    } catch { /* fallback abaixo */ }
+    // Fallback: em algumas versões o próprio id serve como data_source_id
+    return [databaseId]
+  }
 
-  // Processa um database: busca todas as linhas via dataSources.query (SDK v5)
+  // Processa um database: busca TODAS as linhas via dataSources.query
   async function processDatabase(databaseId: string, dbTitle: string, depth: number) {
     if (depth > 4) return
     lines.push(`\n## ${dbTitle}`)
 
-    let cursor: string | undefined
+    const dataSourceIds = await getDataSourceIds(databaseId)
     let rowCount = 0
 
-    do {
-      const res = await notion.dataSources.query({
-        data_source_id: databaseId,
-        start_cursor:   cursor,
-        page_size:      100,
-      })
+    for (const dsId of dataSourceIds) {
+      let cursor: string | undefined
+      do {
+        let res
+        try {
+          res = await notion.dataSources.query({
+            data_source_id: dsId,
+            start_cursor:   cursor,
+            page_size:      100,
+          })
+        } catch { break } // sem acesso a este data source
 
-      for (const row of res.results) {
-        if (rowCount >= 300) break
-        const p = row as { id: string; properties?: Record<string, unknown>; has_children?: boolean; object?: string }
+        for (const row of res.results) {
+          if (rowCount >= 500) break
+          const p = row as { id: string; properties?: Record<string, PropValue>; has_children?: boolean; object?: string }
+          if (p.object !== "page") { rowCount++; continue }
 
-        // Só processa linhas que são páginas (não sub-databases)
-        if (p.object !== "page") { rowCount++; continue }
-
-        if (p.properties) {
-          const propLines = extractProperties(p.properties as Record<string, PropValue>)
-          if (propLines.length > 0) {
-            lines.push(propLines.join(" | "))
+          if (p.properties) {
+            const { title: rowTitle, lines: rowLines } = extractPageProperties(p.properties)
+            const parts = [rowTitle, ...rowLines].filter(Boolean)
+            if (parts.length > 0) lines.push(`- ${parts.join(" | ")}`)
           }
+
+          if (p.has_children && depth < 4) {
+            try { await processBlocks(p.id, depth + 1) } catch { /* ignora */ }
+          }
+          rowCount++
         }
 
-        // Lê blocos internos da linha se houver
-        if (p.has_children && depth < 4) {
-          try { await processBlocks(p.id, depth + 1) } catch { /* ignora linha sem acesso */ }
-        }
-
-        rowCount++
-      }
-
-      cursor = res.next_cursor ?? undefined
-    } while (cursor && rowCount < 300)
+        cursor = res.next_cursor ?? undefined
+      } while (cursor && rowCount < 500)
+    }
   }
 
   // Processa blocos de uma página (recursivo)
@@ -271,7 +301,7 @@ export async function fetchPageContent(
       for (const block of res.results) {
         const b = block as NotionBlock
 
-        // Database filho: usa query() em vez de blocks.children.list()
+        // Database filho: resolve data_source_id e consulta as linhas
         if (b.type === "child_database") {
           const dbTitle = (b.child_database as { title: string }).title || "Database"
           try { await processDatabase(b.id, dbTitle, depth + 1) } catch { /* sem acesso */ }
@@ -291,7 +321,6 @@ export async function fetchPageContent(
         const text = blockToText(b, depth)
         if (text.trim()) lines.push(text)
 
-        // Recursiona em blocos com filhos (toggles, callouts, etc.)
         if (b.has_children && depth < 4) {
           try { await processBlocks(b.id, depth + 1) } catch { /* ignora */ }
         }
@@ -301,7 +330,13 @@ export async function fetchPageContent(
     } while (cursor)
   }
 
-  await processBlocks(pageId, 0)
+  // ── 3. Lê o corpo (blocos filhos) ──
+  // Para páginas: blocos abaixo das propriedades. Para databases: as linhas.
+  if (isPage) {
+    try { await processBlocks(pageId, 0) } catch { /* sem corpo acessível */ }
+  } else {
+    try { await processDatabase(pageId, title, 0) } catch { /* sem acesso */ }
+  }
 
   return { title, content: lines.join("\n") }
 }
