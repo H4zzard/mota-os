@@ -37,6 +37,7 @@ import { createClient as createBrowserClient } from "@/lib/supabase-browser";
 import { cn } from "@/lib/utils";
 import { RocketChatDestinations } from "@/components/settings/RocketChatDestinations";
 import { NotionCard } from "@/components/settings/NotionCard";
+import { JarvisMemoryCard } from "@/components/settings/JarvisMemoryCard";
 import { useCompany } from "@/components/providers/CompanyProvider";
 
 type SettingsTab =
@@ -3674,6 +3675,8 @@ function ApisTab() {
       <ContaAzulCard />
 
       <NotionCard />
+
+      <JarvisMemoryCard />
 
       <div className="space-y-2">
         {APIS_CONFIG.map(def => {

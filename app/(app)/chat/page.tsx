@@ -298,6 +298,21 @@ export default function ChatPage() {
           setActiveSessionId(pendingSid);
         }
         refreshSessions();
+
+        // Memória evolutiva: destila aprendizados desta troca (fire-and-forget,
+        // não bloqueia a UI). Escopo por empresa.
+        if (accumulated.trim() && companyId) {
+          void fetch("/api/jarvis/memory/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              company_id: companyId,
+              session_id: pendingSid ?? activeSessionId,
+              user_message: text,
+              assistant_message: accumulated,
+            }),
+          }).catch(() => {});
+        }
       } catch (err: unknown) {
         if ((err as Error)?.name !== "AbortError") {
           setMessages(prev =>

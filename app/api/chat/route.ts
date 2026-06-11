@@ -515,6 +515,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ─── Memória evolutiva do Jarvis (por empresa) ───────────────────────────────
+  // Recupera aprendizados acumulados desta empresa relevantes ao pedido atual.
+  try {
+    const { recallMemories } = await import("@/lib/jarvis-memory")
+    const memories = await recallMemories(resolvedCompany, body.user_message, 5)
+    if (memories.length > 0) {
+      const parts = memories.map(m => `- ${m.content}`)
+      system = (system ?? "")
+        + `\n\nMEMÓRIA DO JARVIS (aprendizados acumulados desta empresa):\n${parts.join("\n")}\n`
+      void logActivity({
+        userId: user.id, eventType: "source", action: "chat_memory_recalled",
+        detail: `${memories.length} memória(s)`, sessionId: sid as string, companyId: resolvedCompany,
+      })
+    }
+  } catch (memErr) {
+    console.warn("[chat] recall de memória falhou:", memErr)
+  }
+
   // ─── Data Bricks: tool router multi-fonte ────────────────────────────────────
   // O Jarvis decide (planner Haiku) em QUAIS fontes buscar conforme o pedido e
   // executa os retrievers escolhidos. Extensível: registrar uma fonte = adicionar
