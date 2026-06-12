@@ -17,7 +17,11 @@
       "Bash(cd \"/c/Users/Cppem/mota-os\" && grep -n \"filter_agent_id\\\\|agent_file\\\\|agentFile\\\\|role_description\\\\|agent_id\" app/api/chat/route.ts | head -30)",
       "Read(//c/c/Users/Cppem/mota-os/app/api/chat/**)",
       "Bash(cd \"/c/Users/Cppem/mota-os\" && grep -rln \"pdf-parse\\\\|pdfjs\\\\|pdf2\\\\|unpdf\\\\|extractText\\\\|extracted_text\\\\|cheerio\\\\|html-to-text\\\\|striptags\" app lib 2>/dev/null | head -20; echo \"---DEPS---\"; grep -iE \"pdf|cheerio|html-to-text|mammoth|unpdf|jsdom\" package.json)",
-      "Read(//c/c/Users/Cppem/mota-os/**)"
+      "Read(//c/c/Users/Cppem/mota-os/**)",
+      "Bash(cd \"/c/Users/Cppem/mota-os\" && rm -f scripts/_testemb.mjs && echo \"limpo\")"
+    ],
+    "additionalDirectories": [
+      "c:\\c\\Users\\Cppem\\mota-os\\scripts"
     ]
   }
 }

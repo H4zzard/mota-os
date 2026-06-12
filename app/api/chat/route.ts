@@ -489,7 +489,7 @@ export async function POST(req: NextRequest) {
   if (body.notion_page_ids && body.notion_page_ids.length > 0) {
     try {
       const { getNotionClientForCompany, fetchPageContent } = await import("@/lib/notion")
-      const notion = await getNotionClientForCompany(resolvedCompany)
+      const notion = await getNotionClientForCompany(resolvedCompany, { fallbackToGroup: true })
       if (notion) {
         const parts: string[] = []
         for (const pageId of body.notion_page_ids.slice(0, 5)) {
@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
   if (!body.notion_page_ids || body.notion_page_ids.length === 0) {
     try {
       const { getNotionClientForCompany, searchAndFetch } = await import("@/lib/notion")
-      const notion = await getNotionClientForCompany(resolvedCompany)
+      const notion = await getNotionClientForCompany(resolvedCompany, { fallbackToGroup: true })
 
       // Registry de ferramentas disponíveis para esta requisição
       const tools: { id: string; description: string }[] = [
@@ -553,54 +553,58 @@ export async function POST(req: NextRequest) {
       const { routeTools } = await import("@/lib/ai/tool-router")
       const calls = await routeTools(body.user_message, tools)
 
-      for (const call of calls) {
-        // ── Ferramenta: base de conhecimento (RAG semântico) ──
-        if (call.tool === "knowledge_base") {
-          try {
-            const emb = await embedText(call.queries.join(" ").slice(0, 2000))
-            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
-              query_embedding:   `[${emb.join(",")}]`,
-              match_count:       6,
-              filter_company:    resolvedCompany,
-              filter_agent_id:   null,
-              filter_source_ids: null,
-              min_similarity:    0.35,
-            })
-            if (chunks && chunks.length > 0) {
-              const parts = (chunks as { title?: string | null; content: string }[])
-                .map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
-              system = (system ?? "")
-                + `\n\nBASE DE CONHECIMENTO (busca: ${call.queries.join(", ")} — ${parts.length} trecho(s)):\n`
-                + parts.join("\n\n---\n\n") + "\n"
-              void logActivity({
-                userId: user.id, eventType: "source", action: "chat_router_knowledge_base",
-                detail: `${parts.length} trecho(s) — ${call.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
-              })
-            }
-          } catch (kbErr) {
-            console.warn("[chat] tool knowledge_base falhou:", kbErr)
-          }
-        }
+      // Queries agregadas de todas as ferramentas escolhidas
+      const allQueries = [...new Set(calls.flatMap(c => c.queries))]
+      const wantsKnowledgeBase = calls.some(c => c.tool === "knowledge_base")
 
-        // ── Ferramenta: Notion ao vivo ──
-        else if (call.tool === "notion" && notion) {
-          try {
-            const results = await searchAndFetch(notion, call.queries, { maxPages: 2, maxCharsPerPage: 12_000 })
-            if (results.length > 0) {
-              const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
-              const names = results.map(r => r.title).join(", ")
-              system = (system ?? "")
-                + `\n\nDADOS ENCONTRADOS NO NOTION (busca: ${call.queries.join(", ")}):\n`
-                + parts.join("\n\n")
-                + `\n\nInstrução ao assistente: dados localizados automaticamente no Notion. Use-os e mencione brevemente que buscou em: ${names}.\n`
-              void logActivity({
-                userId: user.id, eventType: "source", action: "chat_router_notion",
-                detail: `${results.length} página(s) — ${call.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
-              })
-            }
-          } catch (nErr) {
-            console.warn("[chat] tool notion falhou:", nErr)
+      // ── Ferramenta: base de conhecimento (RAG semântico) ──
+      if (wantsKnowledgeBase && allQueries.length > 0) {
+        try {
+          const emb = await embedText(allQueries.join(" ").slice(0, 2000))
+          const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+            query_embedding:   `[${emb.join(",")}]`,
+            match_count:       6,
+            filter_company:    resolvedCompany,
+            filter_agent_id:   null,
+            filter_source_ids: null,
+            min_similarity:    0.35,
+          })
+          if (chunks && chunks.length > 0) {
+            const parts = (chunks as { title?: string | null; content: string }[])
+              .map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
+            system = (system ?? "")
+              + `\n\nBASE DE CONHECIMENTO (busca: ${allQueries.join(", ")} — ${parts.length} trecho(s)):\n`
+              + parts.join("\n\n---\n\n") + "\n"
+            void logActivity({
+              userId: user.id, eventType: "source", action: "chat_router_knowledge_base",
+              detail: `${parts.length} trecho(s) — ${allQueries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+            })
           }
+        } catch (kbErr) {
+          console.warn("[chat] tool knowledge_base falhou:", kbErr)
+        }
+      }
+
+      // ── Ferramenta: Notion ao vivo ──
+      // Roda se o router escolheu "notion" OU se houve qualquer intenção de busca
+      // e há Notion disponível (o Notion é a fonte de dados rica do grupo).
+      if (notion && allQueries.length > 0) {
+        try {
+          const results = await searchAndFetch(notion, allQueries, { maxPages: 2, maxCharsPerPage: 12_000 })
+          if (results.length > 0) {
+            const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
+            const names = results.map(r => r.title).join(", ")
+            system = (system ?? "")
+              + `\n\nDADOS ENCONTRADOS NO NOTION (busca: ${allQueries.join(", ")}):\n`
+              + parts.join("\n\n")
+              + `\n\nInstrução ao assistente: dados localizados automaticamente no Notion. Use-os para responder e mencione brevemente que buscou em: ${names}.\n`
+            void logActivity({
+              userId: user.id, eventType: "source", action: "chat_router_notion",
+              detail: `${results.length} página(s) — ${allQueries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+            })
+          }
+        } catch (nErr) {
+          console.warn("[chat] tool notion falhou:", nErr)
         }
       }
     } catch (routerErr) {

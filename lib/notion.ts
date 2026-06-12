@@ -37,8 +37,16 @@ export async function getNotionIntegration(companyId: string): Promise<{
 
 // ─── Client factory ───────────────────────────────────────────────────────────
 
-export async function getNotionClientForCompany(companyId: string): Promise<Client | null> {
-  const token = await getNotionToken(companyId)
+// fallbackToGroup: se a empresa-filha não tem Notion próprio, usa a integração
+// da empresa "grupo" (guarda-chuva do grupo educacional — workspace único).
+export async function getNotionClientForCompany(
+  companyId: string,
+  opts: { fallbackToGroup?: boolean } = {},
+): Promise<Client | null> {
+  let token = await getNotionToken(companyId)
+  if (!token && opts.fallbackToGroup && companyId !== "grupo") {
+    token = await getNotionToken("grupo")
+  }
   if (!token) return null
   return new Client({ auth: token })
 }
