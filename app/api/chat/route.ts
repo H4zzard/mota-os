@@ -109,6 +109,12 @@ export async function POST(req: NextRequest) {
     resolvedCompany = await getCurrentCompany(user.id)
   }
 
+  // Escopo de conhecimento: a empresa atual + "grupo" (guarda-chuva do grupo
+  // educacional, onde fica conhecimento compartilhado entre as empresas-filhas).
+  const companyScope = resolvedCompany === "grupo"
+    ? ["grupo"]
+    : [resolvedCompany, "grupo"]
+
   // Valida agent_id: agente deve existir e pertencer a uma empresa acessível
   if (body.agent_id) {
     const { data: agentRow } = await admin
@@ -314,11 +320,11 @@ export async function POST(req: NextRequest) {
       const sessionSourceIds = new Set(sources.map(s => s.id))
       const indexedIds = sources.filter(s => s.embedding_status === "done").map(s => s.id)
 
-      // 2. Todas as fontes indexadas da empresa (para auto-detecção)
+      // 2. Todas as fontes indexadas do escopo (empresa + grupo) p/ auto-detecção
       const { data: allIndexed } = await admin
         .from("knowledge_sources")
         .select("id, name, type, embedding_status")
-        .eq("company_id", resolvedCompany)
+        .in("company_id", companyScope)
         .eq("status", "active")
         .eq("embedding_status", "done")
 
@@ -451,7 +457,8 @@ export async function POST(req: NextRequest) {
           const { data: autoChunks } = await admin.rpc("match_knowledge_chunks", {
             query_embedding:   `[${autoEmb.join(",")}]`,
             match_count:       4,
-            filter_company:    resolvedCompany,
+            filter_company:    null,
+            filter_companies:  companyScope,
             filter_agent_id:   null,
             filter_source_ids: nonSessionIndexed.map(s => s.id),
             min_similarity:    0.5,
@@ -564,7 +571,8 @@ export async function POST(req: NextRequest) {
           const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
             query_embedding:   `[${emb.join(",")}]`,
             match_count:       6,
-            filter_company:    resolvedCompany,
+            filter_company:    null,
+            filter_companies:  companyScope,
             filter_agent_id:   null,
             filter_source_ids: null,
             min_similarity:    0.35,
@@ -729,8 +737,18 @@ export async function POST(req: NextRequest) {
         controller.enqueue(sse({ type: "agent_routed", command: slashAgent.command, label: slashAgent.label }))
       }
 
+      // Diretriz institucional: usuários são colaboradores autorizados; usar os
+      // dados já fornecidos no contexto sem recusar por privacidade, mas sem inventar.
+      const institutionalDirective =
+        "DIRETRIZ INSTITUCIONAL: Você atende colaboradores autorizados do Grupo Mota Educação. "
+        + "Quando o contexto acima contiver dados (fontes de conhecimento, Notion, memória, anexos), "
+        + "use-os diretamente para responder — inclusive dados cadastrais internos (nomes, contatos, matrículas, status). "
+        + "O acesso desses colaboradores já é autorizado e auditado; não recuse por privacidade/LGPD informações que já estão no contexto fornecido. "
+        + "Nunca invente dados que não estejam no contexto: se a informação não foi fornecida, diga claramente que não a encontrou nas fontes."
+      const systemWithDirective = (system ? `${system}\n\n` : "") + institutionalDirective
+
       try {
-        for await (const chunk of streamChat({ messages: safeMessages, system, provider, model })) {
+        for await (const chunk of streamChat({ messages: safeMessages, system: systemWithDirective, provider, model })) {
 
           if (!chunk.done) {
             // Delta parcial
