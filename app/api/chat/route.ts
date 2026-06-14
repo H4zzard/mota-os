@@ -115,6 +115,13 @@ export async function POST(req: NextRequest) {
     ? ["grupo"]
     : [resolvedCompany, "grupo"]
 
+  // Transparência: coleta as fontes consultadas para mostrar ao usuário na resposta.
+  const usedSources: { kind: string; label: string }[] = []
+  const addSource = (kind: string, label: string) => {
+    const l = label.trim()
+    if (l && !usedSources.some(s => s.kind === kind && s.label === l)) usedSources.push({ kind, label: l })
+  }
+
   // Valida agent_id: agente deve existir e pertencer a uma empresa acessível
   if (body.agent_id) {
     const { data: agentRow } = await admin
@@ -364,6 +371,7 @@ export async function POST(req: NextRequest) {
             if (memChunks && memChunks.length > 0) {
               const parts = (memChunks as { title?: string | null; content: string }[])
                 .map(c => `[${c.title ?? "Memória"}]\n${c.content}`)
+              addSource("memória", "Memória do agente")
               system = (system ?? "") + `\n\nMEMÓRIA DO AGENTE (arquivos de conhecimento — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
               void logActivity({
                 userId: user.id, eventType: "source", action: "chat_agent_memory_injected",
@@ -442,6 +450,7 @@ export async function POST(req: NextRequest) {
 
         // Injeção única de todo o conteúdo coletado
         if (contentParts.length > 0) {
+          for (const s of sources) addSource("fonte", s.name)
           system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS (conteúdo completo):\n${contentParts.join("\n\n")}\n`
           void logActivity({
             userId: user.id, eventType: "source", action: "chat_content_injected",
@@ -471,6 +480,7 @@ export async function POST(req: NextRequest) {
             const sourceMap = new Map(nonSessionIndexed.map(s => [s.id, s.name]))
             const detectedIds = [...new Set(chunkList.map(c => c.knowledge_source_id).filter((id): id is string => Boolean(id)))]
             const detectedNames = detectedIds.map(id => sourceMap.get(id) ?? id)
+            for (const n of detectedNames) addSource("fonte", n)
 
             const autoParts = chunkList.map(c => `[${c.title ?? c.source_type ?? "Auto"}]\n${c.content}`)
             system = (system ?? "")
@@ -504,6 +514,7 @@ export async function POST(req: NextRequest) {
             const { title, content } = await fetchPageContent(notion, pageId)
             if (content.trim()) {
               parts.push(`=== Notion: ${title} ===\n${content.slice(0, 8_000)}`)
+              addSource("notion", title)
             }
           } catch (pageErr) {
             console.warn("[chat] Notion page fetch failed:", pageId, pageErr)
@@ -528,6 +539,7 @@ export async function POST(req: NextRequest) {
     const { recallMemories } = await import("@/lib/jarvis-memory")
     const memories = await recallMemories(resolvedCompany, body.user_message, 5)
     if (memories.length > 0) {
+      addSource("memória", "Memória do Jarvis")
       const parts = memories.map(m => `- ${m.content}`)
       system = (system ?? "")
         + `\n\nMEMÓRIA DO JARVIS (aprendizados acumulados desta empresa):\n${parts.join("\n")}\n`
@@ -578,8 +590,9 @@ export async function POST(req: NextRequest) {
             min_similarity:    0.35,
           })
           if (chunks && chunks.length > 0) {
-            const parts = (chunks as { title?: string | null; content: string }[])
-              .map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
+            const kbChunks = chunks as { title?: string | null; content: string }[]
+            for (const c of kbChunks) if (c.title) addSource("fonte", c.title)
+            const parts = kbChunks.map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
             system = (system ?? "")
               + `\n\nBASE DE CONHECIMENTO (busca: ${allQueries.join(", ")} — ${parts.length} trecho(s)):\n`
               + parts.join("\n\n---\n\n") + "\n"
@@ -600,6 +613,7 @@ export async function POST(req: NextRequest) {
         try {
           const results = await searchAndFetch(notion, allQueries, { maxPages: 2, maxCharsPerPage: 12_000 })
           if (results.length > 0) {
+            for (const r of results) addSource("notion", r.title)
             const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
             const names = results.map(r => r.title).join(", ")
             system = (system ?? "")
@@ -645,6 +659,7 @@ export async function POST(req: NextRequest) {
           }
         }
         if (attachCtx.length > 0) {
+          for (const att of attachRows) addSource("anexo", att.file_name)
           system = (system ?? "") + `\n\nANEXOS DO USUÁRIO:\n${attachCtx.join("\n\n")}\n`
         }
       }
@@ -735,6 +750,11 @@ export async function POST(req: NextRequest) {
       // Sinaliza ao cliente qual agente vai responder
       if (slashAgent) {
         controller.enqueue(sse({ type: "agent_routed", command: slashAgent.command, label: slashAgent.label }))
+      }
+
+      // Transparência: informa quais fontes foram consultadas nesta resposta
+      if (usedSources.length > 0) {
+        controller.enqueue(sse({ type: "sources", sources: usedSources }))
       }
 
       // Diretriz institucional: usuários são colaboradores autorizados; usar os

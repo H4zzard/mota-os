@@ -35,7 +35,11 @@ interface SSEAgentRouted {
   command: string;
   label: string;
 }
-type SSEEvent = SSEDelta | SSEDone | SSEError | SSEAgentRouted;
+interface SSESources {
+  type: "sources";
+  sources: { kind: string; label: string }[];
+}
+type SSEEvent = SSEDelta | SSEDone | SSEError | SSEAgentRouted | SSESources;
 
 function parseSSE(raw: string): SSEEvent | null {
   const line = raw.startsWith("data: ") ? raw.slice(6) : raw;
@@ -243,6 +247,13 @@ export default function ChatPage() {
                           slashAgentLabel: event.label,
                         }
                       : m,
+                  ),
+                );
+              } else if (event.type === "sources") {
+                // Fontes consultadas — transparência na resposta
+                setMessages(prev =>
+                  prev.map(m =>
+                    m.id === aiMsgId ? { ...m, sources: event.sources } : m,
                   ),
                 );
               } else if (event.type === "delta") {

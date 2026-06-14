@@ -33,6 +33,8 @@ export interface Message {
   providerUsed?:     string   // ex: "anthropic"
   aiMode?:           string   // ex: "claude" | "jarvis"
   routedByJarvis?:   boolean
+  // Fontes consultadas (transparência)
+  sources?:          { kind: string; label: string }[]
   // Regeneração
   regeneratedFrom?:  string   // assistant_message_id original
   // Anexos

@@ -8,6 +8,13 @@ import type { Message, MessageBlock, ChecklistBlock } from "@/lib/mocks/messages
 import { modelLabel } from "@/lib/ai/model-registry"
 import { MarkdownContent } from "./MarkdownContent"
 
+const SOURCE_ICON: Record<string, string> = {
+  notion:  "📘",
+  fonte:   "📚",
+  memória: "🧠",
+  anexo:   "📎",
+}
+
 function extractMessageText(content: MessageBlock[]): string {
   return content
     .map((block) => {
@@ -106,6 +113,23 @@ export function ChatMessage({ message, index, onSendToRocket, onRegenerate }: Ch
           ))}
         </div>
 
+        {/* Fontes consultadas — transparência */}
+        {!isUser && message.sources && message.sources.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            <span className="text-[10px] font-medium" style={{ color: "var(--text-muted)" }}>
+              Consultou:
+            </span>
+            {message.sources.map((s, i) => (
+              <span key={i}
+                className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border"
+                style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)", background: "var(--bg-card)" }}
+                title={s.kind}>
+                {SOURCE_ICON[s.kind] ?? "📄"} {s.label}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Metadata do modelo — badge discreta */}
         {!isUser && (message.modelUsed || message.providerUsed) && (
           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -194,6 +218,10 @@ function MessageBlockRenderer({
 }) {
   switch (block.kind) {
     case "text":
+      // Resposta da IA ainda vazia → mostra indicador de "pesquisando"
+      if (!isUser && block.content === "") {
+        return <SearchingIndicator />
+      }
       return (
         <div
           className={cn(
@@ -354,6 +382,33 @@ function CardBlock({ block, agentColor }: { block: Extract<MessageBlock, { kind:
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function SearchingIndicator() {
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm"
+      style={{ background: "var(--bg-card)", border: "1px solid var(--border-color)", color: "var(--text-muted)" }}
+    >
+      <motion.span
+        animate={{ rotate: 360 }}
+        transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+        className="inline-block"
+      >
+        🔍
+      </motion.span>
+      <span className="text-xs">Pesquisando nas fontes...</span>
+      <motion.span
+        animate={{ opacity: [0.3, 1, 0.3] }}
+        transition={{ repeat: Infinity, duration: 1.2 }}
+        className="flex gap-0.5"
+      >
+        <span className="w-1 h-1 rounded-full" style={{ background: "var(--text-muted)" }} />
+        <span className="w-1 h-1 rounded-full" style={{ background: "var(--text-muted)" }} />
+        <span className="w-1 h-1 rounded-full" style={{ background: "var(--text-muted)" }} />
+      </motion.span>
     </div>
   )
 }
