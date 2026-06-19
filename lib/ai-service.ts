@@ -11,6 +11,7 @@ import { getValidGeminiToken }    from "@/lib/gemini-auth"
 import { getServiceAccountToken } from "@/lib/gemini-service-account"
 import { createGeminiClient, type GeminiContent, type GeminiModel } from "@/lib/api-connectors/gemini"
 import { ensureAnthropicCredentials } from "@/lib/anthropic-auth"
+import { isProviderConfigured }       from "@/lib/ai/model-registry"
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -144,7 +145,19 @@ function retryAfterSeconds(headers: Headers | undefined): number | null {
  * a UI prefixa "⚠️"). Para limites de uso (429) e cota esgotada, inclui o tempo
  * estimado de retorno quando os headers da Anthropic o informam.
  */
+/** Nome amigável do provedor para mensagens ao usuário. */
+function providerLabel(provider: AIProvider): string {
+  switch (provider) {
+    case "anthropic": return "Claude (Anthropic)"
+    case "gemini":    return "Gemini (Google)"
+    case "openai":    return "OpenAI"
+    case "deepseek":  return "DeepSeek"
+    default:          return provider
+  }
+}
+
 function friendlyAIError(provider: AIProvider, err: unknown): string {
+  const who = providerLabel(provider)
   if (err instanceof Anthropic.APIError) {
     const retry  = retryAfterSeconds(err.headers)
     const body   = err.error as { error?: { message?: string } } | undefined
@@ -162,32 +175,32 @@ function friendlyAIError(provider: AIProvider, err: unknown): string {
     // Limite de uso / rate limit → tem tempo de retorno nos headers
     if (err.status === 429 || err.type === "rate_limit_error") {
       return tempo
-        ? `Limite de uso da IA atingido.${tempo}`
-        : "Limite de uso da IA atingido. Tente novamente em alguns minutos."
+        ? `Limite de uso do ${who} atingido.${tempo}`
+        : `Limite de uso do ${who} atingido. Tente novamente em alguns minutos.`
     }
 
     // Cota/créditos esgotados (billing). Quando há header de reset, mostra o tempo;
-    // senão, evita número falso e indica que costuma voltar em algumas horas.
+    // senão, evita número falso e indica a ação (verificar saldo ou trocar de modelo).
     if (/credit balance/i.test(apiMsg) || err.type === "billing_error") {
       return tempo
-        ? `Cota de uso da IA esgotada.${tempo}`
-        : "A conta da IA atingiu o limite de uso. Costuma voltar em algumas horas — tente novamente mais tarde."
+        ? `Cota/créditos do ${who} esgotados.${tempo}`
+        : `A conta do ${who} está sem créditos/cota disponível no momento. Verifique o saldo (Plans & Billing) ou troque de modelo no seletor do chat.`
     }
 
     if (err.status === 401 || err.status === 403) {
-      return "Falha de autenticação com a IA. Avise o administrador."
+      return `Falha de autenticação com o ${who}. Avise o administrador.`
     }
     if (err.status === 529) {
-      return "O serviço de IA está sobrecarregado. Tente novamente em instantes."
+      return `O ${who} está sobrecarregado. Tente novamente em instantes.`
     }
     if (err.status && err.status >= 500) {
-      return "O serviço de IA está instável no momento. Tente novamente."
+      return `O ${who} está instável no momento. Tente novamente.`
     }
-    return apiMsg ? `Erro da IA: ${apiMsg}` : `Erro da IA (${err.status ?? "?"}).`
+    return apiMsg ? `Erro do ${who}: ${apiMsg}` : `Erro do ${who} (${err.status ?? "?"}).`
   }
 
   const msg = err instanceof Error ? err.message : String(err)
-  return `[${provider}] ${msg}`
+  return `Erro do ${who}: ${msg}`
 }
 
 // ─── Entry point público ──────────────────────────────────────────────────────
@@ -207,6 +220,66 @@ export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChun
     }
   } catch (err: unknown) {
     yield { done: true, text: "", error: friendlyAIError(provider, err) }
+  }
+}
+
+// ─── Fallback automático entre provedores ───────────────────────────────────────
+// Tenta o provedor primário; se ele falhar por cota/limite/sobrecarga/instabilidade
+// ANTES de gerar qualquer texto, troca para o próximo provedor configurado, de forma
+// transparente. O chunk `done` final carrega o provedor que de fato respondeu, então
+// a UI mostra corretamente qual IA gerou a resposta.
+
+const FALLBACK_PREFERENCE: AIProvider[] = ["gemini", "anthropic", "openai", "deepseek"]
+
+const FALLBACK_MODEL: Record<AIProvider, string> = {
+  anthropic: "claude-sonnet-4-6",
+  gemini:    "gemini-2.5-flash",
+  openai:    "gpt-4o",
+  deepseek:  "deepseek-chat",
+}
+
+/** Erros em que vale tentar outro provedor (disponibilidade/recurso, não conteúdo). */
+function isFallbackWorthy(errorText: string): boolean {
+  return /cr[ée]dito|cota|limite de uso|sobrecarregad|inst[aá]vel|autentica[çc]|overload|rate.?limit|credit balance|\b429\b|\b5\d\d\b/i.test(errorText)
+}
+
+export async function* streamChatWithFallback(params: AIStreamParams): AsyncGenerator<AIChunk> {
+  const primary = params.provider ?? "anthropic"
+
+  // Ordem de tentativa: primário, depois preferências — sem repetir, só configurados.
+  const order: AIProvider[] = []
+  for (const p of [primary, ...FALLBACK_PREFERENCE]) {
+    if (!order.includes(p) && isProviderConfigured(p)) order.push(p)
+  }
+  if (order.length === 0) order.push(primary)
+
+  for (let i = 0; i < order.length; i++) {
+    const provider = order[i]
+    const isLast   = i === order.length - 1
+    const model    = provider === primary ? params.model : FALLBACK_MODEL[provider]
+
+    let producedText = false
+    let errorChunk: AIChunkError | null = null
+
+    for await (const chunk of streamChat({ ...params, provider, model })) {
+      if (chunk.done && "error" in chunk) {
+        errorChunk = chunk
+        break
+      }
+      if (!chunk.done && chunk.text) producedText = true
+      yield chunk
+      if (chunk.done) return  // sucesso — encerra
+    }
+
+    if (!errorChunk) return  // defensivo: terminou sem erro nem done
+
+    // Só troca de provedor se nada foi gerado ainda, há próximo, e o erro é de recurso.
+    const canFallback = !producedText && !isLast && isFallbackWorthy(errorChunk.error)
+    if (!canFallback) {
+      yield errorChunk
+      return
+    }
+    console.warn(`[ai-service] ${provider} indisponível ("${errorChunk.error.slice(0, 80)}") → fallback para ${order[i + 1]}`)
   }
 }
 

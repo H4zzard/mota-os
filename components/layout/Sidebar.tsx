@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard,
   MessageSquare,
   Bookmark,
   Tag,
@@ -16,9 +15,6 @@ import {
   Boxes,
   HardDrive,
   Bot,
-  Zap,
-  Puzzle,
-  GitBranch,
   CalendarClock,
   Eye,
   Sparkles,
@@ -44,24 +40,10 @@ interface NavItem {
 }
 
 const ALL_NAV_ITEMS: NavItem[] = [
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    adminOnly: true,
-  },
   { label: "Chat", href: "/chat", icon: MessageSquare },
   { label: "Projetos", href: "/projects", icon: FolderOpen },
   { label: "Fontes", icon: Database, href: "/sources" },
   { label: "Agentes", href: "/agents", icon: Bot },
-  {
-    label: "Automações",
-    icon: Zap,
-    children: [
-      { label: "Agentes", href: "/automations?tab=skills", icon: Puzzle },
-      { label: "Workflows", href: "/workflows", icon: GitBranch },
-    ],
-  },
 ];
 
 interface SidebarProps {
@@ -74,9 +56,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const router = useRouter();
   const { isAdmin, loading: companyLoading } = useCompany();
 
-  const [openGroups, setOpenGroups] = useState<Set<string>>(
-    new Set(["Automações"]),
-  );
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [isHovered, setIsHovered] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userInitial, setUserInitial] = useState("U");
@@ -88,7 +68,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // contentCollapsed atrasa 150ms ao contrair (grupos fecham via AnimatePresence antes
   // do layout trocar), mas muda imediato ao expandir — elimina o jump no final da animação.
   const [contentCollapsed, setContentCollapsed] = useState(isCollapsed);
-  const savedGroupsRef = useRef<Set<string>>(new Set(["Automações"]));
+  const savedGroupsRef = useRef<Set<string>>(new Set());
   const openGroupsRef = useRef(openGroups);
 
   useEffect(() => {
